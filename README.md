@@ -29,14 +29,13 @@ These examples demonstrate that **FuzzyDiff captures gradual semantic changes an
 
 # Architecture
 
-![FuzzyDiff Architecture](<img width="2814" height="1391" alt="diagram1" src="https://github.com/user-attachments/assets/ecbe6c83-c0de-49cb-b565-19bcdc25d666" />)
+![FuzzyDiff Architecture](https://github.com/user-attachments/assets/ecbe6c83-c0de-49cb-b565-19bcdc25d666)
 
 ---
 
 # Highlights
 
-![FuzzyDiff Examples](<img width="1657" height="1170" alt="f2" src="https://github.com/user-attachments/assets/857708e0-7222-4097-9996-29c6c9c2aef2" />
-)
+![FuzzyDiff Examples](https://github.com/user-attachments/assets/857708e0-7222-4097-9996-29c6c9c2aef2)
 
 ---
 
