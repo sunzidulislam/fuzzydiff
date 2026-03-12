@@ -12,7 +12,7 @@ Diffusion models have demonstrated impressive text-to-image generation capabilit
 
 # Influence of Fuzzy Attributes on Image Generation
 
-![Fuzzy Attribute Impact](architecture/fuzzy_impact.png)
+![Fuzzy Attribute Impact](<img width="1097" height="553" alt="fuzzy_impact" src="https://github.com/user-attachments/assets/817ae9df-f509-4fe7-bb39-b87c069de08e" />)
 
 FuzzyDiff enables diffusion models to interpret **graded linguistic modifiers** and translate them into consistent visual changes.
 
@@ -29,13 +29,14 @@ These examples demonstrate that **FuzzyDiff captures gradual semantic changes an
 
 # Architecture
 
-![FuzzyDiff Architecture](architecture/diagram1.png)
+![FuzzyDiff Architecture](<img width="2814" height="1391" alt="diagram1" src="https://github.com/user-attachments/assets/ecbe6c83-c0de-49cb-b565-19bcdc25d666" />)
 
 ---
 
 # Highlights
 
-![FuzzyDiff Examples](output/f2.png)
+![FuzzyDiff Examples](<img width="1657" height="1170" alt="f2" src="https://github.com/user-attachments/assets/857708e0-7222-4097-9996-29c6c9c2aef2" />
+)
 
 ---
 
