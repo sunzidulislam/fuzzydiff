@@ -44,7 +44,7 @@ These examples demonstrate that **FuzzyDiff captures gradual semantic changes an
 ## System Requirements
 
 * **GPU:** NVIDIA GPU (T4 ×2 tested)
-* **Memory:** Minimum **24GB VRAM** (48GB recommended for 768×768 generation)
+* **Memory:** Minimum **32GB VRAM**
 * **Python:** 3.8+
 * **CUDA:** 11.8+
 
