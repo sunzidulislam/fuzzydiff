@@ -96,13 +96,45 @@ def valid_output(root, job, record):
     return True
 
 
+def upgrade_original_metadata_failure(root, manifest, design):
+    """One narrowly allowlisted metadata repair; never mix changed generation settings."""
+    old = manifest['design']
+    old_hashes = old.get('code_sha256', {})
+    new_hashes = design.get('code_sha256', {})
+    notebooks = {'dc0be5b2c7b0905f4aa3aa82fd85501fc13c4ec154c76d50a4cd587adc0dac91',
+                 '642457b70b7b65df05002bb31c51eb0fbb1e5fde4c026f6695036bdb1e839fe1'}
+    same_settings = {k: v for k, v in old.items() if k != 'code_sha256'} == \
+                    {k: v for k, v in design.items() if k != 'code_sha256'}
+    if not (same_settings and
+            old_hashes.get('snow_gpu.py') == '7d48b27b7f334bf5cf8011881cdc62b45c76073a7862c25ec608bcc9c0e99f95' and
+            old_hashes.get('snow_experiment.py') == '14561514686917a6078271b2801afc12f3b68779cb529c9f5970ef0fc91840e7' and
+            new_hashes.get('snow_gpu.py') == '7af010bfc6ab5404b7cfaffe46bd234d37a12f81274f692dd89662fb09cbe0ea' and
+            old_hashes.get('pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb') in notebooks and
+            new_hashes.get('pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb') in notebooks and
+            not any(r.get('status') == 'complete' for r in manifest['runs'].values())):
+        return False
+    key_path = root / 'review_key.json'
+    if key_path.exists():
+        key = json.loads(key_path.read_text(encoding='utf-8'))
+        if key['design'] not in (old, design):
+            return False
+        key['design'] = design
+        atomic_json(key_path, key)
+    manifest.setdefault('code_upgrades', []).append({
+        'at': utc_now(), 'reason': 'Repair CLIPTextConfig metadata access; generation algorithm unchanged.',
+        'from': old_hashes, 'to': new_hashes})
+    manifest['design'] = design
+    print('Upgraded the original failed metadata run; preserving attempts and study settings.', flush=True)
+    return True
+
+
 def run_study(root, design, backend, full=False):
     """Generate in weight-sharing phases; backend failures are recorded, never hidden."""
     root = Path(root)
     path = root / 'manifest.json'
     if path.exists():
         manifest = json.loads(path.read_text(encoding='utf-8'))
-        if manifest['design'] != design:
+        if manifest['design'] != design and not upgrade_original_metadata_failure(root, manifest, design):
             raise ValueError('Output directory contains a different design or code version; use a new --output.')
         if manifest.get('scope') == 'full' and not full:
             raise ValueError('This directory is a full study; rerun with --full to preserve its scope.')

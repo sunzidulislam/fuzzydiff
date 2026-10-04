@@ -4,10 +4,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 import torch
 
-from snow_gpu import load_attention, save_attention, notebook_cells
+from snow_gpu import SnowBackend, load_attention, save_attention, notebook_cells
+from snow_experiment import make_design, jobs_for
 
 
 class StoreFixture:
@@ -21,6 +24,32 @@ class StoreFixture:
 
 
 class GPUAdapterTests(unittest.TestCase):
+    def test_native_generation_metadata_handles_real_transformers_config(self):
+        from transformers import CLIPTextConfig
+        from diffusers import DPMSolverMultistepScheduler
+        from PIL import Image
+        class NativeFixture:
+            scheduler = DPMSolverMultistepScheduler()
+            unet = SimpleNamespace(config={'_commit_hash': 'unet-revision'})
+            vae = SimpleNamespace(config={})
+            text_encoder = SimpleNamespace(config=CLIPTextConfig(_commit_hash='text-revision'))
+            text_encoder_2 = SimpleNamespace(config=CLIPTextConfig())
+            def __call__(self, **kwargs):
+                return SimpleNamespace(images=[Image.new('RGB', (8, 8))])
+        backend = SnowBackend(make_design())
+        backend.native = NativeFixture()
+        backend.namespace = {'clip_prompt_similarities': lambda image, prompt: {'full_text': 0.3}}
+        job = next(j for j in jobs_for(backend.design) if j['method'] == 'native')
+        with patch.multiple(torch.cuda, reset_peak_memory_stats=lambda: None,
+                            get_device_name=lambda index: 'CPU fixture', synchronize=lambda: None,
+                            max_memory_allocated=lambda: 0, max_memory_reserved=lambda: 0):
+            _, metadata = backend.generate(job, Path('.'))
+        self.assertEqual(metadata['checkpoint_commits']['text_encoder'], 'text-revision')
+        self.assertIsNone(metadata['checkpoint_commits']['text_encoder_2'])
+        self.assertEqual(metadata['checkpoint_commits']['unet'], 'unet-revision')
+        self.assertEqual(metadata['scheduler']['lambda_min_clipped'], '-inf')
+        json.dumps(metadata, allow_nan=False)
+
     def test_attention_roundtrip(self):
         with tempfile.TemporaryDirectory() as directory:
             file = Path(directory) / 'attention' / 'fixture.pt'

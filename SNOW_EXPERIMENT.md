@@ -77,6 +77,13 @@ Run the same command after a session interruption to resume. Keep the entire
 and manifest, as a Kaggle output/dataset across sessions. Copy it back to the
 same output path before resuming. Git pull must match the saved code/settings;
 a changed implementation requires a new `--output` directory.
+
+The original `e9fad45` runner failed after sampling because its checkpoint
+metadata assumed mapping configs. The metadata repair also serializes the
+scheduler's legitimate `-inf` bound as a string. It can automatically upgrade
+that original run when settings are identical and no images were marked
+complete, retaining failure history. Failed samples were not saved as PNGs and
+must be generated again. Other code/settings changes still require a new output directory.
 Once expanded, resume with `--full`; the default pilot command rejects a full
 study directory so its other images cannot be hidden accidentally.
 

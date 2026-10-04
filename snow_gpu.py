@@ -3,6 +3,27 @@ import gc
 import json
 from pathlib import Path
 import platform
+import math
+from collections.abc import Mapping
+
+
+def checkpoint_commit(component):
+    """Diffusers uses mapping configs; Transformers uses PretrainedConfig objects."""
+    config = getattr(component, 'config', None)
+    return config.get('_commit_hash') if isinstance(config, Mapping) else getattr(config, '_commit_hash', None)
+
+
+def scheduler_metadata(value):
+    """Keep legitimate infinite scheduler bounds in standards-compliant JSON."""
+    if isinstance(value, Mapping):
+        return {key: scheduler_metadata(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [scheduler_metadata(item) for item in value]
+    if hasattr(value, 'tolist'):
+        return scheduler_metadata(value.tolist())
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    return value
 
 
 def notebook_cells():
@@ -154,9 +175,9 @@ class SnowBackend:
         metadata['peak_gpu_allocated_bytes'] = torch.cuda.max_memory_allocated()
         metadata['peak_gpu_reserved_bytes'] = torch.cuda.max_memory_reserved()
         metadata['clip'] = self.namespace['clip_prompt_similarities'](image, job['prompt'])
-        metadata['scheduler'] = dict(pipeline.scheduler.config)
+        metadata['scheduler'] = scheduler_metadata(pipeline.scheduler.config)
         metadata['checkpoint_commits'] = {
-            name: getattr(getattr(pipeline, name, None), 'config', {}).get('_commit_hash')
+            name: checkpoint_commit(getattr(pipeline, name, None))
             for name in ('unet', 'vae', 'text_encoder', 'text_encoder_2')}
         return image, metadata
 

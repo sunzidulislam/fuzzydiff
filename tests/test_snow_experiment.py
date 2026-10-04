@@ -31,6 +31,30 @@ class FakeBackend:
 
 
 class StudyTests(unittest.TestCase):
+    def test_original_metadata_failure_can_resume_without_losing_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            current = make_design()
+            previous = json.loads(json.dumps(current))
+            previous['code_sha256'] = {
+                'snow_gpu.py': '7d48b27b7f334bf5cf8011881cdc62b45c76073a7862c25ec608bcc9c0e99f95',
+                'snow_experiment.py': '14561514686917a6078271b2801afc12f3b68779cb529c9f5970ef0fc91840e7',
+                'pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb': 'dc0be5b2c7b0905f4aa3aa82fd85501fc13c4ec154c76d50a4cd587adc0dac91',
+            }
+            job = jobs_for(previous)[0]
+            manifest = {'design': previous, 'scope': 'pilot', 'runs': {
+                job['id']: {'job': job, 'status': 'failed', 'attempts': [
+                    {'status': 'failed', 'error': "AttributeError: 'CLIPTextConfig' object has no attribute 'get'"}]}},
+                'phase_times': []}
+            (root / 'manifest.json').write_text(json.dumps(manifest))
+            (root / 'review_key.json').write_text(json.dumps({'design': previous, 'images': {}}))
+            result = run_study(root, current, FakeBackend())
+            self.assertEqual(len(result['runs'][job['id']]['attempts']), 2)
+            self.assertEqual(result['runs'][job['id']]['status'], 'complete')
+            self.assertEqual(result['design'], current)
+            self.assertEqual(result['code_upgrades'][0]['from'], previous['code_sha256'])
+            self.assertEqual(json.loads((root / 'review_key.json').read_text())['design'], current)
+
     def test_design_counts_and_matched_prompts(self):
         design = make_design()
         pilot = jobs_for(design, False)
