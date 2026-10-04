@@ -43,10 +43,11 @@ These examples demonstrate that **FuzzyDiff captures gradual semantic changes an
 
 ## System Requirements
 
-* **GPU:** NVIDIA GPU (T4 ×2 tested)
-* **Memory:** Minimum **32GB VRAM**
-* **Python:** 3.8+
-* **CUDA:** 11.8+
+* **GPU:** NVIDIA GPU; the main notebook targets a Kaggle T4 with CPU offload.
+* **Memory:** Models run sequentially on GPU 0; T4 ×2 does not pool VRAM. Actual
+  T4 peak memory must be checked with the smoke test before a full run.
+* **Python:** 3.10+ with CUDA-enabled PyTorch (keep Kaggle's preinstalled PyTorch).
+* **Internet:** Required to clone the repository and download model weights.
 
 ---
 
@@ -60,17 +61,56 @@ pip install git+https://github.com/openai/CLIP.git
 
 # Usage
 
-Follow the notebook or script workflow:
+The maintained entry point is `pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb`.
+The other pipeline notebook is an older experiment and has not received these fixes.
 
-1. Install dependencies
-2. Load configuration
-3. Define fuzzy logic operators
-4. Load CLIP model
-5. Set up attention control mechanisms
-6. Load the SDXL base model
-7. Generate images with fuzzy guidance
-8. Refine results with predicate-aware refinement
-9. Evaluate using semantic similarity and CLIP-based metrics
+In Kaggle, enable **Internet** and select **GPU T4 ×2**, then run:
+
+```python
+!git clone https://github.com/sunzidulislam/fuzzydiff.git /kaggle/working/fuzzydiff
+%cd /kaggle/working/fuzzydiff
+%pip install -r requirements.txt
+!nvidia-smi
+%run run_fullpipeline.py
+```
+
+For an existing checkout, use `!git pull --ff-only` inside that directory instead
+of cloning again. These changes must be committed and pushed to GitHub before
+Kaggle can retrieve them.
+
+The default smoke test generates a 512 × 512 image with four base steps and
+eight refiner steps (strength 0.4). It checks execution, not final image quality.
+After it succeeds, run the full 768 × 768 / 50 base-step configuration:
+
+```python
+%run run_fullpipeline.py --full
+```
+
+Each seed writes `seed_<seed>_stage1.png`, `seed_<seed>_stage2_refined.png` and
+`seed_<seed>_metadata.json` to `/kaggle/working/outputs`. Stage one saves before
+refinement starts, so its image survives a refiner error. Metadata records scores,
+configuration, versions and actual fuzzy gradient/update magnitudes. Smoke and full
+runs with the same seed overwrite those filenames; download smoke outputs first
+if you want to keep them.
+
+To run interactively, import the main notebook into Kaggle and run top to bottom.
+Set `SMOKE_TEST = False` in its final cell for a full run. Change prompt, tracked
+phrases, seeds, negative prompt and optional relations there. Supported explicit
+relations are `left_of`, `right_of`, `above`, `below`; no spatial constraint is
+added automatically. Model-loading cells must be rerun after the final cell unloads
+the base pipeline.
+
+The loss guides token presence and configured 2D relations. It does not calibrate
+hedges such as "slightly" or "very", or depth relations such as "behind". Better
+visual results require matched-seed comparison on GPU; CLIP scores alone do not
+establish improvement. See [the full two-axis review](REVIEW.md).
+
+CPU regression checks (no model downloads):
+
+```bash
+python -m unittest discover -s tests -v
+python run_fullpipeline.py --check
+```
 
 ---
 
