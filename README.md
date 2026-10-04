@@ -118,6 +118,9 @@ save to `/kaggle/working/outputs/comparison_seed_142`. Inspect all three before
 changing prompts or claiming a visual improvement. Small gradients are no longer
 normalized into fixed-size updates; updates preserve their magnitude, cap RMS at
 0.01, and retain float32 latent precision.
+Native SDXL uses its usual latent precision; the custom runs use float32 latents.
+Compare the two custom images to isolate the effect of guidance. Native-versus-custom
+differences also include latent precision and attention implementation differences.
 
 CPU regression checks (no model downloads):
 

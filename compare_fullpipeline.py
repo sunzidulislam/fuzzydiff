@@ -21,6 +21,9 @@ def run_comparison(namespace):
     directory.mkdir(parents=True, exist_ok=True)
     report = {'seed': seed, 'settings': settings, 'words_to_track': words,
               'stage': 'base only, no refinement',
+              'precision': {'unet': str(pipeline.unet.dtype),
+                            'native_latents': str(pipeline.unet.dtype), 'custom_latents': 'torch.float32'},
+              'comparison_note': 'Native/custom also differ in latent precision; custom-off/custom-on isolates guidance.',
               'versions': {'torch': torch.__version__, 'diffusers': __import__('diffusers').__version__},
               'runs': {}}
     original_processors = dict(pipeline.unet.attn_processors)

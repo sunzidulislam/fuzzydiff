@@ -90,3 +90,8 @@ results with identical prompt, seed, CFG, steps and dimensions, without a refine
 The CPU tiny-model test checks custom/native latent agreement within fp32 attention
 rounding tolerance, as well as connected guidance and repeatability. Pretrained GPU
 output quality still requires running and inspecting that comparison in Kaggle.
+Native sampling retains its normal latent precision, while custom sampling retains
+float32 latents. Native/custom comparisons therefore include precision differences;
+the custom guidance-off/on pair isolates the guidance correction. Small accumulated
+float32 updates are preserved between steps, but individual updates may not immediately
+cross the fp16 UNet input's rounding threshold.
