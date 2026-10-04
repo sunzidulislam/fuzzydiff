@@ -63,7 +63,7 @@ quality require a Kaggle run. Begin with the smoke test, inspect its diagnostics
 images, then run the full settings. Compare guidance-on/off with matched prompt,
 seed, scheduler and negative prompt; compare refinement against stage one separately.
 
-Local verification: seven regression tests pass, including a real tiny SDXL pipeline
+Local verification: eight regression tests pass, including a real tiny SDXL pipeline
 with checkpointed gradients, guidance-on/off output differences, seeded repeatability
 and VAE decoding. All 26 code cells compile, notebook schema validation passes, and
 Git whitespace checks pass. The pinned Diffusers scheduler emits an upstream NumPy
@@ -71,3 +71,22 @@ deprecation warning during CPU testing; it does not fail execution.
 
 Standards: 5 findings; worst was duplicated attention processing. Spec: 7 findings;
 worst was inactive fuzzy guidance.
+
+## Follow-up: distorted seed-142 output
+
+The supplied metadata records a full 768px, 50-step run. Gradient RMS values around
+1e-5 were normalized into update RMS values of 0.13–0.20 over 30 steps, amplifying
+small gradients roughly 10,000–30,000 times. This unvalidated normalization was
+introduced in the first repair and is removed. Raw gradient steps now retain their
+magnitude, with an RMS ceiling of 0.01; latents stay float32 to preserve small updates
+while the UNet still uses its loaded dtype. The scaling regression fails on the old
+implementation and passes on the corrected implementation.
+
+Stage one was already visually distorted. Refinement reduced full-prompt CLIP
+similarity from 0.2292946 to 0.2207624. These observations motivate baseline diagnosis;
+they do not prove that scaling is the only cause or that the corrected output looks
+better. `--compare` saves native SDXL, custom guidance-off, and corrected guidance-on
+results with identical prompt, seed, CFG, steps and dimensions, without a refiner.
+The CPU tiny-model test checks custom/native latent agreement within fp32 attention
+rounding tolerance, as well as connected guidance and repeatability. Pretrained GPU
+output quality still requires running and inspecting that comparison in Kaggle.

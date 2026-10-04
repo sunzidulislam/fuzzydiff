@@ -111,6 +111,29 @@ class NotebookRegressionTests(unittest.TestCase):
                         'Predicate refinement modified CFG negative conditioning')
         self.assertFalse(torch.allclose(modified[1], baseline[1], atol=1e-6))
 
+    def test_small_guidance_gradients_are_not_amplified(self):
+        # A tiny gradient must remain a tiny update, rather than be normalized to lr.
+        from types import SimpleNamespace
+        store = self.code['AttentionStore'](attn_res=2)
+        class ConditionalForward(torch.nn.Module):
+            def forward(self, latents, timestep, **kwargs):
+                weights = torch.tensor([0.1, 0.2, -0.1]).view(1, 1, 3)
+                probabilities = (latents.flatten().view(1, 4, 1) * weights * 0.001).softmax(-1)
+                store.forward(probabilities, True, 'down')
+                return (torch.zeros_like(latents),)
+        pipeline = object.__new__(self.code['FuzzyAttendExciteSDXLPipeline'])
+        pipeline.unet = ConditionalForward()
+        pipeline.scheduler = SimpleNamespace(scale_model_input=lambda value, timestep: value)
+        config = SimpleNamespace(alpha=10., spatial_loss_weight=0., attend_excite_lr=0.2, n_inference_steps=50)
+        latents = torch.tensor([[[[0.1, 0.2], [0.3, 0.4]]]])
+        updated = pipeline._update_latents_with_fuzzy_loss(latents, store, [1], config,
+            timestep=1, prompt_embeds=torch.zeros(1, 3, 4), added_cond_kwargs={})
+        diagnostics = store.guidance_diagnostics[0]
+        self.assertLess(diagnostics['gradient_rms'], 0.001)
+        self.assertLessEqual(diagnostics['update_rms'], config.attend_excite_lr * diagnostics['gradient_rms'] + 1e-7,
+                             'Tiny gradients were amplified into large latent perturbations')
+        self.assertFalse(torch.equal(latents, updated))
+
     def test_checkpointed_sdxl_guidance_changes_seeded_denoising(self):
         # Real randomly initialized SDXL components exercise the complete latent loop.
         from diffusers import AutoencoderKL, UNet2DConditionModel, DPMSolverMultistepScheduler, StableDiffusionXLPipeline
@@ -161,6 +184,15 @@ class NotebookRegressionTests(unittest.TestCase):
                 return output.images, store
 
             baseline, _ = sample(0)
+            unet.set_attn_processor(dict(pipeline._original_attention_processors))
+            native = StableDiffusionXLPipeline(**pipeline.components, add_watermarker=False)
+            native_output = native(prompt='a cat', negative_prompt='', height=64, width=64,
+                num_inference_steps=2, guidance_scale=2,
+                generator=torch.Generator().manual_seed(9), output_type='latent').images
+            # Manual attention versus SDPA differs at fp32 rounding scale; the scheduler's
+            # initial sigma (~157) magnifies this into ~2e-4 latent error in this fixture.
+            self.assertTrue(torch.allclose(baseline, native_output, atol=5e-4, rtol=1e-5),
+                            f'Guidance-off/native max latent difference: {(baseline - native_output).abs().max().item()}')
             guided, store = sample(1)
             repeated, _ = sample(1)
             self.assertTrue(torch.isfinite(guided).all())
