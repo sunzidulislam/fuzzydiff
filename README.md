@@ -129,6 +129,28 @@ python -m unittest discover -s tests -v
 python run_fullpipeline.py --check
 ```
 
+## Snow coverage research experiment
+
+The confirmed WaterGen-inspired layout evaluates five snow-cover prompt levels
+across native SDXL, current FuzzyDiff and FuzzyDiff plus refiner. It evaluates
+the current method without adding a calibrated snow-severity objective.
+
+After cloning and installing the requirements above:
+
+```python
+!python run_snow_experiment.py --plan
+!python run_snow_experiment.py
+```
+
+The default pilot generates 15 images for alpine mountains, seed 142, at the
+full 768px/50-step settings. Inspect it before expanding with
+`!python run_snow_experiment.py --full` to three scenes, five seeds and 225
+images. Each image is persisted; rerunning resumes completed work. Outputs
+include PNG/PDF grids, diagnostics, runtime, failure records, and an anonymous
+review pack for two independent human reviewers. There are no pre-filled human
+ratings or claims of improved quality. See [the experiment protocol and full
+Kaggle commands](SNOW_EXPERIMENT.md) for resuming across sessions and analyzing ratings.
+
 ---
 
 # Stage 1: Fuzzy-Guided Generation
