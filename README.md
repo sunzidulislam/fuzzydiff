@@ -131,6 +131,21 @@ python run_fullpipeline.py --check
 
 ## Snow coverage research experiment
 
+For the **fixed-scene 9 x 11 coverage/thickness grid**, use the separate mode:
+
+```python
+!python run_snow_control.py --plan
+!python run_snow_control.py
+```
+
+It creates one FuzzyDiff bare-rock mountain scene, estimates a terrain mask on
+CPU, and applies explicit image-space snow rendering at 99 parameter settings.
+The figure includes axes and a clean reference beneath, following the requested
+layout. Relative thickness controls opacity/texture, not physical snow depth.
+This demonstrates renderer control; it does not establish improved fuzzy latent
+guidance. Inspect the saved source and mask overlay. See [commands, definitions
+and limitations](SNOW_CONTROL.md). Outputs use a separate `outputs/snow_control` folder.
+
 The confirmed WaterGen-inspired layout evaluates five snow-cover prompt levels
 across native SDXL, current FuzzyDiff and FuzzyDiff plus refiner. It evaluates
 the current method without adding a calibrated snow-severity objective.
