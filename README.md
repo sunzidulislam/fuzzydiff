@@ -321,3 +321,11 @@ We compare FuzzyDiff with several diffusion-based generation methods:
   [https://github.com/daheekwon/C3](https://github.com/daheekwon/C3)
 
 ---
+
+
+For the four-condition dusty-car comparison, use `--four-way` rather than
+`--compare`. Its display order is SDXL+fuzzy, SDXL fuzzy-off, SD 1.5 native,
+and SD 1.5+fuzzy. All arms use the base stage only. `four_way.png` shows the
+images, `four_way.json` holds the measurements, and `four_way_results.md`
+reports the measured min-part CLIP ranking independently of display order.
+See [the seed-142 findings and Kaggle command](DUSTY_CAR_FINDINGS.md).

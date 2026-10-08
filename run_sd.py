@@ -317,6 +317,8 @@ def main():
     }, indent=2), encoding='utf-8')
     if truths:
         print('Phrase presence truth:', truths, flush=True)
+    if diagnostics:
+        print('Guidance:', fuzzy['summarize_guidance'](diagnostics), flush=True)
     print('Saved:', image_path.resolve(), flush=True)
 
 

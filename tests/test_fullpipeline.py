@@ -147,6 +147,23 @@ class NotebookRegressionTests(unittest.TestCase):
         soft = self.code['phrase_truth_scores'](store, 10.0, 5.0)['phrase']
         self.assertNotAlmostEqual(sharp, soft, places=3)
 
+    def test_summarize_guidance_flags_an_inert_run(self):
+        # Three runs reached this state unnoticed: guidance executed, moved the
+        # latent by well under 0.01 percent, and produced an image identical to
+        # the unguided one. The summary has to say so before the images are read.
+        def diagnostics(ratio, clipped=False):
+            return [{'update_ratio': ratio, 'clipped': clipped, 'loss': 1.0} for _ in range(5)]
+
+        inert = self.code['summarize_guidance'](diagnostics(7.4e-05))
+        self.assertTrue(inert['inert'])
+        self.assertIn('INERT', inert['note'])
+        active = self.code['summarize_guidance'](diagnostics(3.0e-03))
+        self.assertFalse(active['inert'])
+        self.assertEqual(active['note'], 'guidance active')
+        pinned = self.code['summarize_guidance'](diagnostics(3.0e-03, clipped=True))
+        self.assertIn('ceiling', pinned['note'])
+        self.assertEqual(self.code['summarize_guidance']([])['steps'], 0)
+
     def test_relative_membership_rescales_to_its_own_peak(self):
         membership = torch.tensor([0.0, 0.1, 0.4])
         relative = self.code['relative_membership'](membership)

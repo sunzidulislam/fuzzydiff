@@ -57,8 +57,7 @@ def save_grid(directory, images, scores, title):
                 axis.set_title(f'{LABELS[name]}\n(not run)', fontsize=10)
                 continue
             axis.imshow(images[name])
-            minimum = scores[name]['clip']['min_part']
-            axis.set_title(f'{LABELS[name]}\nmin-part CLIP {minimum:.4f}', fontsize=10)
+            axis.set_title(LABELS[name], fontsize=10)
     figure.suptitle(title, fontsize=11)
     figure.text(0.5, 0.015, 'Base stage only; display order is not a quality ranking. '
                 'CLIP does not establish dust intensity.', ha='center', fontsize=9)
@@ -137,6 +136,9 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
         if store is not None:
             entry['phrase_truth'] = truths
             entry['guidance_diagnostics'] = list(store.guidance_diagnostics)
+            entry['guidance_summary'] = namespace['summarize_guidance'](store.guidance_diagnostics)
+            if entry['guidance_summary'].get('inert'):
+                print('  WARNING:', entry['guidance_summary']['note'], flush=True)
         report['runs'][name] = entry
         (directory / 'four_way.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
         print(f"{name}: full {entry['clip']['full']:.4f}  min-part {entry['clip']['min_part']:.4f}"

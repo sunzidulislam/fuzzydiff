@@ -313,3 +313,36 @@ to create temporary tokenizer/image fixtures outside the workspace on Windows;
 it emitted existing dependency deprecation warnings. An independent code review
 found no blocking correctness or wiring issue. Visual dust improvement, intensity
 control, and GPU memory use remain unverified.
+
+
+## 2026-10-09: measured relative-mode dusty-car pilot, seed 142
+
+Source: user-supplied `comparison (3).json`, archived at
+`outputs/dust_relative_seed142_analysis/comparison.json`; calculations and the
+next four-way command are recorded in `DUSTY_CAR_FINDINGS.md`.
+
+Settings: 768px, 50 steps, CFG 9.5, product t-norm, relative membership,
+slightly-dusty-to-car binding weight 1.0, no refinement. Full-prompt CLIP:
+native SDXL 0.29896495; custom fuzzy-off 0.29895893; fuzzy lr=0.2 0.30111814;
+fuzzy lr=5 0.29008627. Deltas against fuzzy-off: +0.00215921 and -0.00887266.
+The dust attention truth goes 0.969600 -> 0.970065 / 0.970515. Both guided
+arms make 30 nonzero updates with no clipping. Mean update ratios are
+0.000038979 and 0.001084462, respectively. Guidance is connected, but raising
+the dust attention truth does not establish visual dust improvement.
+
+The user reports that the images look the same. This review inspected the
+JSON, not the corresponding four image pixels. The CLIP half scores duplicate
+the full score because the scorer splits only on " and ", absent from this
+prompt. This file contains no separate dust CLIP score and no SD 1.5 arm.
+There is still no demonstrated visual dust-intensity improvement.
+
+The four-way figure now presents SDXL+fuzzy, SDXL fuzzy-off, SD 1.5 native,
+and SD 1.5+fuzzy in the requested order. Its measured min-part CLIP ranking
+remains computed independently. A new `four_way_results.md` reports that rank,
+full and min-part scores, and within-backbone deltas without asserting a winner
+in advance. No new generation was performed locally for this reporting change.
+
+Reporting-change validation: all 51 CPU tests passed. The new regression keeps
+SDXL+fuzzy first in display order even when its measured min-part CLIP rank is
+third, preserving the actual ranking. The grid layout was visually checked using
+explicitly labeled synthetic layout fixtures, not experiment images.
