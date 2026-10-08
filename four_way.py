@@ -124,7 +124,9 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
                 relations=[(attribute, 'bound_to', obj) for attribute, obj in bindings],
                 membership_sharpness=sharpness, t_norm=t_norm,
                 binding_loss_weight=binding_weight, pipeline=pipeline)
-            record(name, image, store, namespace['phrase_truth_scores'](store))
+            # Report truths at the sharpness guidance actually used, not the default.
+            record(name, image, store,
+                   namespace['phrase_truth_scores'](store, 10.0, sharpness))
     finally:
         pipeline.unet.set_attn_processor(original_processors)
         unload(pipeline)

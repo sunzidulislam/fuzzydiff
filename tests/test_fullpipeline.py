@@ -131,6 +131,22 @@ class NotebookRegressionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.code['compute_fuzzy_loss'](maps, [0, 1], t_norm='lukasiewicz')
 
+    def test_phrase_truth_scores_honour_the_sharpness_they_are_given(self):
+        # Reporting truths at the default sharpness while guidance ran at another
+        # value makes the two incomparable, which hid a real change in one run.
+        context = 8
+        store = self.code['AttentionStore'](attn_res=2)
+        store.token_groups = {'phrase': [1]}
+        store.text_span = (1, context - 1)
+        logits = torch.full((1, 4, context), -2.0)
+        logits[:, :2, 1] = 2.0
+        store.begin_forward()
+        store.forward(logits.softmax(-1).expand(2, -1, -1), True, 'down')
+        store.end_forward()
+        sharp = self.code['phrase_truth_scores'](store, 10.0, 100.0)['phrase']
+        soft = self.code['phrase_truth_scores'](store, 10.0, 5.0)['phrase']
+        self.assertNotAlmostEqual(sharp, soft, places=3)
+
     def test_relative_membership_rescales_to_its_own_peak(self):
         membership = torch.tensor([0.0, 0.1, 0.4])
         relative = self.code['relative_membership'](membership)

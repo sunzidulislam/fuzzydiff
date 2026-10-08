@@ -11,7 +11,7 @@ NEGATIVE = ('cartoon, anime, illustration, painting, drawing, sketch, 3d render,
 
 
 def run_comparison(namespace, prompt='A very fast car', words=('fast', 'car'), seed=142,
-                   learning_rates=(0.2,)):
+                   learning_rates=(0.2,), sharpness=100.0, t_norm='min'):
     pipeline = namespace['model']
     words = list(words)
     settings = dict(prompt=prompt, negative_prompt=NEGATIVE, height=768, width=768,
@@ -21,6 +21,7 @@ def run_comparison(namespace, prompt='A very fast car', words=('fast', 'car'), s
     directory.mkdir(parents=True, exist_ok=True)
     report = {'seed': seed, 'settings': settings, 'words_to_track': words,
               'learning_rates': list(learning_rates),
+              'membership_sharpness': sharpness, 't_norm': t_norm,
               'stage': 'base only, no refinement',
               'precision': {'unet': str(pipeline.unet.dtype),
                             'native_latents': str(pipeline.unet.dtype), 'custom_latents': 'torch.float32'},
@@ -34,7 +35,8 @@ def run_comparison(namespace, prompt='A very fast car', words=('fast', 'car'), s
         file = directory / f'{label}.png'
         image.save(file)
         scores = namespace['clip_prompt_similarities'](image, prompt)
-        truths = namespace['phrase_truth_scores'](store) if store is not None else None
+        truths = (namespace['phrase_truth_scores'](store, 10.0, sharpness)
+                  if store is not None else None)
         diagnostics = list(store.guidance_diagnostics) if store is not None else []
         report['runs'][label] = {'image': str(file), 'clip': scores, 'phrase_truth': truths,
                                  'guidance_diagnostics': diagnostics,
@@ -70,7 +72,7 @@ def run_comparison(namespace, prompt='A very fast car', words=('fast', 'car'), s
             image, _, store = namespace['generate'](
                 prompt, words, seed=seed, num_steps=50, guidance=9.5, height=768, width=768,
                 max_iter_to_alter=updates, attend_excite_lr=rate, negative_prompt=NEGATIVE,
-                relations=[], pipeline=pipeline)
+                relations=[], membership_sharpness=sharpness, t_norm=t_norm, pipeline=pipeline)
             save(label, image, store)
         print('Compare all images in:', directory.resolve(), flush=True)
     finally:

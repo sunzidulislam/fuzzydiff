@@ -68,7 +68,8 @@ def main():
         run_comparison(namespace, prompt=options.prompt,
                        words=[word.strip() for word in options.words.split(',') if word.strip()],
                        seed=options.seed,
-                       learning_rates=[float(rate) for rate in options.lr.split(',') if rate.strip()])
+                       learning_rates=[float(rate) for rate in options.lr.split(',') if rate.strip()],
+                       sharpness=options.sharpness, t_norm=options.tnorm)
 
 
 if __name__ == '__main__':
