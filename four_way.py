@@ -76,7 +76,7 @@ def unload(pipeline):
 
 def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2, updates=30,
                  sd_model='stable-diffusion-v1-5/stable-diffusion-v1-5', negative='',
-                 sdxl_guidance=9.5, sd_guidance=7.5, output=None):
+                 sdxl_guidance=9.5, sd_guidance=7.5, sharpness=100.0, t_norm='min', output=None):
     words = list(words)
     directory = Path(output) if output else (
         (Path('/kaggle/working/outputs') if Path('/kaggle/working').exists()
@@ -85,6 +85,7 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
     report = {'prompt': prompt, 'words_to_track': words, 'seed': seed,
               'stage': 'base only, no refinement',
               'settings': {'steps': steps, 'fuzzy_lr': learning_rate, 'guided_steps': updates,
+                           'membership_sharpness': sharpness, 't_norm': t_norm,
                            'sdxl_guidance': sdxl_guidance, 'sd_guidance': sd_guidance,
                            'sdxl_size': 768, 'sd_size': 512, 'sd_model': sd_model,
                            'negative_prompt': negative},
@@ -116,7 +117,8 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
             image, _, store = namespace['generate'](
                 prompt, words, seed=seed, num_steps=steps, guidance=sdxl_guidance,
                 height=768, width=768, max_iter_to_alter=guided, attend_excite_lr=learning_rate,
-                negative_prompt=negative, relations=[], pipeline=pipeline)
+                negative_prompt=negative, relations=[], membership_sharpness=sharpness,
+                t_norm=t_norm, pipeline=pipeline)
             record(name, image, store, namespace['phrase_truth_scores'](store))
     finally:
         pipeline.unet.set_attn_processor(original_processors)
@@ -148,7 +150,7 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
         print('Generating sd15_fuzzy', flush=True)
         cfg, groups = run_sd.build_config(fuzzy, sd_pipeline.tokenizer, prompt, words, seed,
                                           directory, steps, sd_guidance, 512,
-                                          learning_rate, updates)
+                                          learning_rate, updates, sharpness, t_norm)
         image, store = run_sd.generate_fuzzy(sd_pipeline, fuzzy, cfg, groups, negative)
         record('sd15_fuzzy', image, store,
                fuzzy['phrase_truth_scores'](store, cfg.alpha, cfg.membership_sharpness))

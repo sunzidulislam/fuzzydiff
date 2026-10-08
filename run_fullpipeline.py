@@ -15,6 +15,10 @@ def main():
     parser.add_argument('--prompt', default='A very fast car', help='Comparison prompt.')
     parser.add_argument('--words', default='fast,car', help='Comma-separated tracked phrases for --compare.')
     parser.add_argument('--seed', type=int, default=142, help='Comparison seed.')
+    parser.add_argument('--sharpness', type=float, default=100.0,
+                        help='Membership sharpness; lower keeps truths graded instead of near-binary.')
+    parser.add_argument('--tnorm', choices=('min', 'product'), default='min',
+                        help="Fuzzy conjunction: 'min' gradients only the weakest phrase, 'product' all of them.")
     parser.add_argument('--lr', default='0.2',
                         help='Comma-separated guidance step sizes; --compare renders one image per value.')
     options = parser.parse_args()
@@ -44,7 +48,8 @@ def main():
         four_way.run_four_way(namespace, prompt=options.prompt,
                               words=[word.strip() for word in options.words.split(',') if word.strip()],
                               seed=options.seed,
-                              learning_rate=float(options.lr.split(',')[0]))
+                              learning_rate=float(options.lr.split(',')[0]),
+                              sharpness=options.sharpness, t_norm=options.tnorm)
     elif options.compare:
         # %run reuses the kernel, so a module imported before a git pull would be
         # served from sys.modules; reload so the file on disk is what runs.

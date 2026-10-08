@@ -74,7 +74,8 @@ class FuzzyStableDiffusionPipeline(StableDiffusionPipeline):
                 loss = self.fuzzy['compute_fuzzy_loss'](store.get_current_step_attention(),
                                                         cfg.token_groups, cfg.alpha,
                                                         cfg.spatial_loss_weight, relations,
-                                                        cfg.text_span, cfg.membership_sharpness)
+                                                        cfg.text_span, cfg.membership_sharpness,
+                                                        getattr(cfg, 't_norm', 'min'))
                 if not loss.requires_grad:
                     raise RuntimeError('Fuzzy loss is disconnected from the latent graph.')
                 gradient = torch.autograd.grad(loss, leaf)[0]
@@ -164,10 +165,11 @@ def build_pipeline(model_id, device, fuzzy=None):
 
 
 def build_config(fuzzy, tokenizer, prompt, words, seed, output_path, steps=50, guidance=7.5,
-                 size=512, learning_rate=0.2, updates=25):
+                 size=512, learning_rate=0.2, updates=25, sharpness=100.0, t_norm='min'):
     cfg = fuzzy['RunConfig'](prompt=prompt, seeds=[seed], n_inference_steps=steps,
                              guidance_scale=guidance, height=size, width=size,
                              max_iter_to_alter=updates, attend_excite_lr=learning_rate,
+                             membership_sharpness=sharpness, t_norm=t_norm,
                              output_path=Path(output_path))
     groups = fuzzy['get_token_groups'](tokenizer, prompt, words)
     # Membership is a phrase's share of the prompt's own tokens, so the start/end
@@ -218,6 +220,10 @@ def main():
     parser.add_argument('--size', type=int, default=512, help='Square image size; SD 1.x is trained at 512.')
     parser.add_argument('--lr', type=float, default=0.2, help='Fuzzy guidance step size.')
     parser.add_argument('--updates', type=int, default=25, help='Number of guided denoising steps.')
+    parser.add_argument('--sharpness', type=float, default=100.0,
+                        help='Membership sharpness; lower keeps truths graded instead of near-binary.')
+    parser.add_argument('--tnorm', choices=('min', 'product'), default='min',
+                        help="Fuzzy conjunction: 'min' gradients only the weakest phrase, 'product' all of them.")
     parser.add_argument('--negative', default='', help='Negative prompt.')
     parser.add_argument('--output', default=None, help='Output directory.')
     options = parser.parse_args()
@@ -244,7 +250,7 @@ def main():
     if options.fuzzy:
         cfg, groups = build_config(fuzzy, pipeline.tokenizer, options.prompt, words, options.seed,
                                    output, options.steps, options.guidance, options.size,
-                                   options.lr, options.updates)
+                                   options.lr, options.updates, options.sharpness, options.tnorm)
         print('Tracked phrase tokens:', groups, flush=True)
         image, store = generate_fuzzy(pipeline, fuzzy, cfg, groups, options.negative)
         truths = fuzzy['phrase_truth_scores'](store, cfg.alpha, cfg.membership_sharpness)

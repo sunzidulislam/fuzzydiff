@@ -120,6 +120,17 @@ class NotebookRegressionTests(unittest.TestCase):
         loss = self.code['compute_fuzzy_loss'](maps, [0, 1])
         self.assertAlmostEqual(loss.item(), 0.69314718, places=5)
 
+    def test_product_t_norm_counts_every_phrase_not_only_the_weakest(self):
+        # Both phrases have truth 0.5 here. Goedel min keeps one -log term, so only
+        # the weakest phrase drives the objective; the product t-norm keeps both.
+        maps = {'down_cross': torch.full((1, 4, 2), 0.5)}
+        minimum = self.code['compute_fuzzy_loss'](maps, [0, 1], t_norm='min')
+        product = self.code['compute_fuzzy_loss'](maps, [0, 1], t_norm='product')
+        self.assertAlmostEqual(minimum.item(), 0.69314718, places=5)
+        self.assertAlmostEqual(product.item(), 1.38629436, places=5)
+        with self.assertRaises(ValueError):
+            self.code['compute_fuzzy_loss'](maps, [0, 1], t_norm='lukasiewicz')
+
     def test_attention_aggregation_handles_small_and_large_maps(self):
         store = self.code['AttentionStore'](attn_res=4)
         if hasattr(store, 'begin_forward'):
