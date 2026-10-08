@@ -6,36 +6,41 @@ from pathlib import Path
 import torch
 from diffusers import StableDiffusionXLPipeline, DPMSolverMultistepScheduler
 
+NEGATIVE = ('cartoon, anime, illustration, painting, drawing, sketch, 3d render, cgi, '
+            'toy-like, plastic texture, low quality, blurry, distorted, text, watermark')
 
-def run_comparison(namespace):
+
+def run_comparison(namespace, prompt='A very fast car', words=('fast', 'car'), seed=142,
+                   learning_rates=(0.2,)):
     pipeline = namespace['model']
-    prompt = 'A very fast car'
-    words = ['fast', 'car']
-    negative_prompt = ('cartoon, anime, illustration, painting, drawing, sketch, 3d render, cgi, '
-                       'toy-like, plastic texture, low quality, blurry, distorted, text, watermark')
-    settings = dict(prompt=prompt, negative_prompt=negative_prompt, height=768, width=768,
+    words = list(words)
+    settings = dict(prompt=prompt, negative_prompt=NEGATIVE, height=768, width=768,
                     num_inference_steps=50, guidance_scale=9.5)
-    seed = 142
     directory = (Path('/kaggle/working/outputs') if Path('/kaggle/working').exists()
                  else Path('./outputs')) / f'comparison_seed_{seed}'
     directory.mkdir(parents=True, exist_ok=True)
     report = {'seed': seed, 'settings': settings, 'words_to_track': words,
+              'learning_rates': list(learning_rates),
               'stage': 'base only, no refinement',
               'precision': {'unet': str(pipeline.unet.dtype),
                             'native_latents': str(pipeline.unet.dtype), 'custom_latents': 'torch.float32'},
               'comparison_note': 'Native/custom also differ in latent precision; custom-off/custom-on isolates guidance.',
+              'truth_note': 'phrase_truth is the method\'s own objective; compare guidance-off against each rate.',
               'versions': {'torch': torch.__version__, 'diffusers': __import__('diffusers').__version__},
               'runs': {}}
     original_processors = dict(pipeline.unet.attn_processors)
 
-    def save(label, image, diagnostics=(), token_groups=None):
+    def save(label, image, store=None):
         file = directory / f'{label}.png'
         image.save(file)
         scores = namespace['clip_prompt_similarities'](image, prompt)
-        report['runs'][label] = {'image': str(file), 'clip': scores,
-                                 'guidance_diagnostics': list(diagnostics), 'token_groups': token_groups}
+        truths = namespace['phrase_truth_scores'](store) if store is not None else None
+        diagnostics = list(store.guidance_diagnostics) if store is not None else []
+        report['runs'][label] = {'image': str(file), 'clip': scores, 'phrase_truth': truths,
+                                 'guidance_diagnostics': diagnostics,
+                                 'token_groups': store.token_groups if store is not None else None}
         (directory / 'comparison.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
-        print(label, 'CLIP:', scores['full_text'], 'saved:', file, flush=True)
+        print(label, 'CLIP:', scores['full_text'], 'truth:', truths, 'saved:', file, flush=True)
 
     native = None
     try:
@@ -56,15 +61,18 @@ def run_comparison(namespace):
 
         pipeline.unet.set_attn_processor(dict(original_processors))
         pipeline.enable_model_cpu_offload(gpu_id=0)
-        for label, updates in [('02_custom_guidance_off', 0), ('03_raw_gradient_guidance', 30)]:
+        # Guidance off first: its phrase truths are the baseline each rate is measured against.
+        runs = [('02_custom_guidance_off', 0, 0.2)]
+        runs += [(f'03_guidance_lr_{rate:g}', 30, rate) for rate in learning_rates]
+        for label, updates, rate in runs:
             pipeline.scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
             print('Generating', label, flush=True)
             image, _, store = namespace['generate'](
                 prompt, words, seed=seed, num_steps=50, guidance=9.5, height=768, width=768,
-                max_iter_to_alter=updates, attend_excite_lr=0.2, negative_prompt=negative_prompt,
+                max_iter_to_alter=updates, attend_excite_lr=rate, negative_prompt=NEGATIVE,
                 relations=[], pipeline=pipeline)
-            save(label, image, store.guidance_diagnostics, store.token_groups)
-        print('Compare all three images in:', directory.resolve(), flush=True)
+            save(label, image, store)
+        print('Compare all images in:', directory.resolve(), flush=True)
     finally:
         if native is not None:
             native.remove_all_hooks()

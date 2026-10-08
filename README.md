@@ -157,9 +157,19 @@ If an image is distorted, diagnose stage one with a matched-seed comparison:
 %run run_fullpipeline.py --compare
 ```
 
-This runs native SDXL, custom sampling with guidance disabled, and corrected
-raw-gradient guidance using the original prompt `A very fast car`, seed 142,
-768 × 768 pixels, 50 steps and CFG 9.5. It skips refinement. Images and scores
+This runs native SDXL, custom sampling with guidance disabled, and guidance at
+each requested step size, using seed 142, 768 × 768 pixels, 50 steps and CFG 9.5.
+It skips refinement. `--prompt`, `--words`, `--seed` and `--lr` override the
+defaults; `--lr` takes a comma-separated list and renders one image per value:
+
+```python
+%run run_fullpipeline.py --compare --prompt "a red book and a yellow clock" --words "red book,yellow clock" --lr 0.2,2,20
+```
+
+Each run records `phrase_truth`, the method's own graded objective. Compare the
+guidance-off truths against each step size: that is the direct measurement of
+whether fuzzy guidance grounds the tracked phrases, where CLIP similarity is only
+a coarse proxy. Images and scores
 save to `/kaggle/working/outputs/comparison_seed_142`. Inspect all three before
 changing prompts or claiming a visual improvement. Small gradients are no longer
 normalized into fixed-size updates; updates preserve their magnitude, cap RMS at

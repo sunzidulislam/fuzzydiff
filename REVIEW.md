@@ -209,3 +209,27 @@ output. Run `python run_fullpipeline.py --compare` first and read `update_ratio`
 Spec: 7 findings, 5 fixed; worst was the ungraded truth value that made the loss
 nearly constant. Standards: 4 findings, all fixed; worst was the duplicated
 attention-to-mask normalization between the two stages.
+
+## Measured on GPU: seed 142, "A very fast car", 768px / 50 steps
+
+The matched-seed comparison ran after the membership change. Native SDXL and custom
+guidance-off are visually near-identical, CLIP `0.26656` against `0.26599`, which
+verifies the custom sampling path against the reference implementation. The streaked
+stage-one output recorded in the earlier follow-up no longer occurs.
+
+Guidance is connected and bounded but weak at the shipped settings: across 30 updates
+`clipped` is false on every step, `gradient_rms` is `3.7e-4` to `9.4e-4`, `latent_rms`
+is about `1.0`, and `update_ratio` runs `6e-5` to `1.9e-4`. The `0.01` ceiling never
+binds, so roughly fifty times more step size is available before it would. The guided
+image is still visibly different from guidance-off, because early latent perturbations
+compound through sampling.
+
+CLIP similarity does not separate the three runs: `0.26656` native, `0.26599`
+guidance-off, `0.26448` guidance-on. Two measurement problems, not method problems.
+First, `A very fast car` is a prompt SDXL already satisfies, so there is no missing
+object or failed binding for guidance to correct and no headroom to measure. Second,
+CLIP is a coarse proxy for an objective the method defines exactly: the phrase
+membership truth. `--compare` now records `phrase_truth` per run and accepts
+`--prompt`, `--words`, `--seed` and a comma-separated `--lr` sweep, so guidance-off
+truths can be compared against each step size on a prompt that native SDXL fails.
+No improvement is claimed until that comparison exists.
