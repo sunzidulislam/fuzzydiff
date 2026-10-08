@@ -78,7 +78,8 @@ class FuzzyStableDiffusionPipeline(StableDiffusionPipeline):
                                                         cfg.spatial_loss_weight, relations,
                                                         cfg.text_span, cfg.membership_sharpness,
                                                         getattr(cfg, 't_norm', 'min'),
-                                                        getattr(cfg, 'binding_loss_weight', 1.0))
+                                                        getattr(cfg, 'binding_loss_weight', 1.0),
+                                                        getattr(cfg, 'membership_mode', 'share'))
                 if not loss.requires_grad:
                     raise RuntimeError('Fuzzy loss is disconnected from the latent graph.')
                 gradient = torch.autograd.grad(loss, leaf)[0]
@@ -168,11 +169,12 @@ def build_pipeline(model_id, device, fuzzy=None):
 
 
 def build_config(fuzzy, tokenizer, prompt, words, seed, output_path, steps=50, guidance=7.5,
-                 size=512, learning_rate=0.2, updates=25, sharpness=100.0, t_norm='min'):
+                 size=512, learning_rate=0.2, updates=25, sharpness=100.0, t_norm='min',
+                 membership_mode='share'):
     cfg = fuzzy['RunConfig'](prompt=prompt, seeds=[seed], n_inference_steps=steps,
                              guidance_scale=guidance, height=size, width=size,
                              max_iter_to_alter=updates, attend_excite_lr=learning_rate,
-                             membership_sharpness=sharpness, t_norm=t_norm,
+                             membership_sharpness=sharpness, t_norm=t_norm, membership_mode=membership_mode,
                              output_path=Path(output_path))
     groups = fuzzy['get_token_groups'](tokenizer, prompt, words)
     # Membership is a phrase's share of the prompt's own tokens, so the start/end
@@ -209,6 +211,7 @@ def generate_fuzzy(pipeline, fuzzy, cfg, groups, negative_prompt='', relations=(
     store = fuzzy['AttentionStore'](attn_res=cfg.attn_res)
     store.token_groups = groups
     store.text_span = cfg.text_span
+    store.membership_mode = cfg.membership_mode
     pipeline.register_attention_control(store)
     return pipeline.sample(cfg, store, relations=relations, negative_prompt=negative_prompt), store
 
@@ -247,6 +250,8 @@ def main():
     parser.add_argument('--updates', type=int, default=25, help='Number of guided denoising steps.')
     parser.add_argument('--sharpness', type=float, default=100.0,
                         help='Membership sharpness; lower keeps truths graded instead of near-binary.')
+    parser.add_argument('--membership-mode', choices=('share', 'relative'), default='share',
+                        help='Experimental relative mode normalizes each phrase by its own spatial peak.')
     parser.add_argument('--tnorm', choices=('min', 'product'), default='min',
                         help="Fuzzy conjunction: 'min' gradients only the weakest phrase, 'product' all of them.")
     parser.add_argument('--bind', action='append', metavar='ATTR>OBJECT',
@@ -280,7 +285,8 @@ def main():
     if options.fuzzy:
         cfg, groups = build_config(fuzzy, pipeline.tokenizer, options.prompt, words, options.seed,
                                    output, options.steps, options.guidance, options.size,
-                                   options.lr, options.updates, options.sharpness, options.tnorm)
+                                   options.lr, options.updates, options.sharpness, options.tnorm,
+                                   options.membership_mode)
         cfg.binding_loss_weight = options.binding_weight
         relations = resolve_bindings(groups, parse_bindings(options.bind))
         print('Tracked phrase tokens:', groups, flush=True)
@@ -306,6 +312,7 @@ def main():
         'seed': options.seed, 'negative_prompt': options.negative,
         'scheduler': 'DPMSolverMultistep dpmsolver++ karras', 'settings': settings,
         'phrase_truth': truths, 'guidance_diagnostics': diagnostics, 'image': str(image_path),
+        'truth_note': 'Attention-derived objective, not visual accuracy or attribute intensity.',
         'versions': {'torch': torch.__version__, 'diffusers': __import__('diffusers').__version__},
     }, indent=2), encoding='utf-8')
     if truths:

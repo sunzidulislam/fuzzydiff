@@ -277,3 +277,39 @@ This targets attribute leakage in multi-object prompts, a reproducible backbone
 failure. It does not create attribute intensity that the backbone never renders, so it
 is not expected to fix the dusty-car example; that example is better replaced than
 rescued.
+
+
+## 2026-10-09: experimental relative membership and runner settings
+
+The maintainer approved the experimental relative membership mode after inspecting
+`sdxl_fuzzy (10).png`, whose hood/body did not clearly show a thin dust layer.
+No new pretrained GPU run was performed during this change.
+
+`phrase_membership` now accepts `share` (unchanged default) or `relative`.
+Relative mode sums a phrase's raw token attention before normalizing by its own
+spatial maximum, rather than applying the extra per-position token softmax.
+This allows an attribute and its object to have high membership on the same pixels.
+Sharpness affects only share mode. The canonical implementation remains in the
+notebook, and both backbone losses, diagnostics, and refinement use the selected
+mode. Reports record the mode; old stores without a mode continue to use share.
+
+This is spatial-support normalization, not calibrated presence or intensity:
+even weak nonzero attention peaks at 1, and uniform nonzero attention becomes all
+ones. High relative truths cannot establish that dust is visible or that its
+intensity matches "slightly". The existing attention-to-image limitation remains.
+
+Two settings bugs were reproduced with failing CPU regression tests and fixed:
+`--full` ignored the requested prompt/phrases/seed/fuzzy settings, using the
+notebook's hardcoded example, and `--compare` silently dropped attribute bindings.
+The notebook entry now forwards all its fuzzy settings to generation. `--output`
+is available across SDXL runner modes to keep experiments in separate directories.
+The README supplies matched-prompt/seed share-versus-relative Kaggle commands.
+
+Validation: all 50 CPU tests pass via `.venv-cpu/Scripts/python.exe -m unittest
+discover -s tests`, including tiny randomly initialized SDXL and SD 1.x integration
+checks showing finite nonzero relative-mode updates and a different objective
+from share mode. All 26 notebook code cells compile. The CPU suite needed approval
+to create temporary tokenizer/image fixtures outside the workspace on Windows;
+it emitted existing dependency deprecation warnings. An independent code review
+found no blocking correctness or wiring issue. Visual dust improvement, intensity
+control, and GPU memory use remain unverified.

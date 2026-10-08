@@ -160,6 +160,34 @@ hedges such as "slightly" or "very", or depth relations such as "behind". Better
 visual results require matched-seed comparison on GPU; CLIP scores alone do not
 establish improvement. See [the full two-axis review](REVIEW.md).
 
+An experimental `--membership-mode relative` is available on both backbones, the
+full pipeline, and comparison runners. The default `share` mode is unchanged.
+Relative mode pools each phrase's raw token attention and divides it by that
+phrase's own spatial maximum. An attribute and its object can therefore both have
+high membership at the same pixels. Guidance, reported truths, and refinement use
+the same selected mode; reports record `membership_mode`. `--sharpness` controls
+only `share` mode and has no effect in `relative` mode.
+
+Relative membership discards absolute attention strength: a weak nonzero map has
+a peak of 1, and a uniform nonzero map is all ones. Its truth values measure the
+normalized spatial support, **not visual presence, dust intensity, or accuracy**.
+The mode is an experiment addressing attribute/object competition, not a verified
+fix for rendering "slightly dusty". No GPU improvement has been measured for it.
+
+For the dusty-car experiment, run the same prompt and seed in separate output
+directories. In Kaggle, after copying or pulling this version of the code:
+
+```python
+%run run_fullpipeline.py --compare --prompt "A slightly dusty red sports car parked on a road." --words "slightly dusty,red sports car,road" --seed 42 --tnorm product --sharpness 20 --lr 0.2,5 --bind "slightly dusty>red sports car" --membership-mode share --output /kaggle/working/dust_share_seed42
+%run run_fullpipeline.py --compare --prompt "A slightly dusty red sports car parked on a road." --words "slightly dusty,red sports car,road" --seed 42 --tnorm product --sharpness 20 --lr 0.2,5 --bind "slightly dusty>red sports car" --membership-mode relative --output /kaggle/working/dust_relative_seed42
+```
+
+Inspect the hood and body panels in the saved PNGs, then repeat with other seeds.
+Each comparison saves native SDXL, custom guidance-off, and each requested guidance
+rate. Compare visible dust, car appearance, and artifacts; higher internal truths
+do not establish improvement. `--compare` now honors bindings, and `--full` honors
+the supplied prompt, tracked phrases, seed, guidance settings, and output directory.
+
 If an image is distorted, diagnose stage one with a matched-seed comparison:
 
 ```python
@@ -175,10 +203,9 @@ defaults; `--lr` takes a comma-separated list and renders one image per value:
 %run run_fullpipeline.py --compare --prompt "a red book and a yellow clock" --words "red book,yellow clock" --lr 0.2,2,20
 ```
 
-Each run records `phrase_truth`, the method's own graded objective. Compare the
-guidance-off truths against each step size: that is the direct measurement of
-whether fuzzy guidance grounds the tracked phrases, where CLIP similarity is only
-a coarse proxy. Images and scores
+Each run records `phrase_truth`, the method's own attention-derived objective.
+Compare guidance-off truths against each step size to inspect optimization, not
+to measure visual faithfulness. CLIP similarity is also only a coarse proxy. Images and scores
 save to `/kaggle/working/outputs/comparison_seed_142`. Inspect all three before
 changing prompts or claiming a visual improvement. Small gradients are no longer
 normalized into fixed-size updates; updates preserve their magnitude, cap RMS at

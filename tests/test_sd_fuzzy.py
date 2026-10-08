@@ -108,6 +108,14 @@ class StableDiffusionBackboneTests(unittest.TestCase):
             repeated, _ = run_sd.generate_fuzzy(pipeline, self.fuzzy, cfg, groups)
             self.assertEqual(list(guided.getdata()), list(repeated.getdata()),
                              'Seeded guided sampling was not repeatable')
+            cfg.membership_mode = 'relative'
+            relative, relative_store = run_sd.generate_fuzzy(pipeline, self.fuzzy, cfg, groups)
+            self.assertEqual(relative.size, (64, 64))
+            self.assertEqual(relative_store.membership_mode, 'relative')
+            self.assertGreater(relative_store.guidance_diagnostics[0]['update_rms'], 0)
+            self.assertNotAlmostEqual(relative_store.guidance_diagnostics[0]['loss'],
+                                      store.guidance_diagnostics[0]['loss'], places=5,
+                                      msg='SD 1.x ignored the selected membership mode')
 
     def test_four_way_grid_renders_every_condition(self):
         with tempfile.TemporaryDirectory() as directory:

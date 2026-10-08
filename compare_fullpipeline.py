@@ -11,22 +11,26 @@ NEGATIVE = ('cartoon, anime, illustration, painting, drawing, sketch, 3d render,
 
 
 def run_comparison(namespace, prompt='A very fast car', words=('fast', 'car'), seed=142,
-                   learning_rates=(0.2,), sharpness=100.0, t_norm='min'):
+                   learning_rates=(0.2,), sharpness=100.0, t_norm='min', bindings=(),
+                   binding_weight=1.0, membership_mode='share', output=None):
     pipeline = namespace['model']
     words = list(words)
     settings = dict(prompt=prompt, negative_prompt=NEGATIVE, height=768, width=768,
                     num_inference_steps=50, guidance_scale=9.5)
-    directory = (Path('/kaggle/working/outputs') if Path('/kaggle/working').exists()
-                 else Path('./outputs')) / f'comparison_seed_{seed}'
+    directory = Path(output) if output else (
+        (Path('/kaggle/working/outputs') if Path('/kaggle/working').exists()
+         else Path('./outputs')) / f'comparison_seed_{seed}')
     directory.mkdir(parents=True, exist_ok=True)
     report = {'seed': seed, 'settings': settings, 'words_to_track': words,
               'learning_rates': list(learning_rates),
               'membership_sharpness': sharpness, 't_norm': t_norm,
+              'membership_mode': membership_mode, 'bindings': [list(pair) for pair in bindings],
+              'binding_weight': binding_weight,
               'stage': 'base only, no refinement',
               'precision': {'unet': str(pipeline.unet.dtype),
                             'native_latents': str(pipeline.unet.dtype), 'custom_latents': 'torch.float32'},
               'comparison_note': 'Native/custom also differ in latent precision; custom-off/custom-on isolates guidance.',
-              'truth_note': 'phrase_truth is the method\'s own objective; compare guidance-off against each rate.',
+              'truth_note': 'phrase_truth is an attention-derived objective, not visual accuracy or attribute intensity.',
               'versions': {'torch': torch.__version__, 'diffusers': __import__('diffusers').__version__},
               'runs': {}}
     original_processors = dict(pipeline.unet.attn_processors)
@@ -72,7 +76,9 @@ def run_comparison(namespace, prompt='A very fast car', words=('fast', 'car'), s
             image, _, store = namespace['generate'](
                 prompt, words, seed=seed, num_steps=50, guidance=9.5, height=768, width=768,
                 max_iter_to_alter=updates, attend_excite_lr=rate, negative_prompt=NEGATIVE,
-                relations=[], membership_sharpness=sharpness, t_norm=t_norm, pipeline=pipeline)
+                relations=[(attribute, 'bound_to', obj) for attribute, obj in bindings],
+                membership_sharpness=sharpness, t_norm=t_norm, pipeline=pipeline,
+                binding_loss_weight=binding_weight, membership_mode=membership_mode)
             save(label, image, store)
         print('Compare all images in:', directory.resolve(), flush=True)
     finally:

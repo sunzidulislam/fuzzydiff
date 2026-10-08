@@ -12,9 +12,12 @@ def main():
     parser.add_argument('--compare', action='store_true', help='Compare native SDXL, guidance-off and guidance-on; no refinement.')
     parser.add_argument('--four-way', action='store_true',
                         help='SD 1.5 and SDXL, each with and without fuzzy guidance; no refinement.')
-    parser.add_argument('--prompt', default='A very fast car', help='Comparison prompt.')
-    parser.add_argument('--words', default='fast,car', help='Comma-separated tracked phrases for --compare.')
-    parser.add_argument('--seed', type=int, default=142, help='Comparison seed.')
+    parser.add_argument('--prompt', default='A very fast car', help='Generation prompt.')
+    parser.add_argument('--words', default='fast,car', help='Comma-separated tracked phrases.')
+    parser.add_argument('--seed', type=int, default=142, help='Generation seed.')
+    parser.add_argument('--output', help='Output directory; use a new directory for each experiment.')
+    parser.add_argument('--membership-mode', choices=('share', 'relative'), default='share',
+                        help='Experimental relative mode normalizes each phrase by its own spatial peak.')
     parser.add_argument('--sharpness', type=float, default=100.0,
                         help='Membership sharpness; lower keeps truths graded instead of near-binary.')
     parser.add_argument('--tnorm', choices=('min', 'product'), default='min',
@@ -27,9 +30,32 @@ def main():
     parser.add_argument('--lr', default='0.2',
                         help='Comma-separated guidance step sizes; --compare renders one image per value.')
     options = parser.parse_args()
+    words = [word.strip() for word in options.words.split(',') if word.strip()]
+    try:
+        rates = [float(rate) for rate in options.lr.split(',') if rate.strip()]
+        if not rates or any(not 0 <= rate < float('inf') for rate in rates):
+            raise ValueError('--lr must contain finite, nonnegative values.')
+        if not options.compare and len(rates) != 1:
+            raise ValueError('Multiple --lr values require --compare.')
+        bindings = []
+        for value in options.bind or ():
+            attribute, separator, obj = value.partition('>')
+            if not separator or not attribute.strip() or not obj.strip():
+                raise ValueError('--bind expects "attribute>object".')
+            pair = (attribute.strip(), obj.strip())
+            if any(phrase not in words for phrase in pair):
+                raise ValueError('Both binding operands must appear in --words.')
+            bindings.append(pair)
+    except ValueError as error:
+        parser.error(str(error))
     path = Path(__file__).parent / 'pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb'
     notebook = json.loads(path.read_text(encoding='utf-8'))
-    namespace = {'__name__': '__main__', 'FULL_RUN': options.full}
+    namespace = {'__name__': '__main__', 'FULL_RUN': options.full,
+                 'RUN_OPTIONS': dict(prompt=options.prompt, words=words, seed=options.seed,
+                                     attend_excite_lr=rates[0], membership_sharpness=options.sharpness,
+                                     t_norm=options.tnorm, membership_mode=options.membership_mode,
+                                     relations=[(a, 'bound_to', b) for a, b in bindings],
+                                     binding_loss_weight=options.binding_weight, output=options.output)}
     count = 0
     for index, cell in enumerate(notebook['cells']):
         if cell['cell_type'] != 'code':
@@ -53,12 +79,12 @@ def main():
         importlib.reload(run_sd)
         importlib.reload(four_way)
         four_way.run_four_way(namespace, prompt=options.prompt,
-                              words=[word.strip() for word in options.words.split(',') if word.strip()],
+                              words=words,
                               seed=options.seed,
-                              learning_rate=float(options.lr.split(',')[0]),
+                              learning_rate=rates[0],
                               sharpness=options.sharpness, t_norm=options.tnorm,
-                              bindings=run_sd.parse_bindings(options.bind),
-                              binding_weight=options.binding_weight)
+                              bindings=bindings, binding_weight=options.binding_weight,
+                              membership_mode=options.membership_mode, output=options.output)
     elif options.compare:
         # %run reuses the kernel, so a module imported before a git pull would be
         # served from sys.modules; reload so the file on disk is what runs.
@@ -66,10 +92,11 @@ def main():
         importlib.reload(compare_fullpipeline)
         run_comparison = compare_fullpipeline.run_comparison
         run_comparison(namespace, prompt=options.prompt,
-                       words=[word.strip() for word in options.words.split(',') if word.strip()],
+                       words=words,
                        seed=options.seed,
-                       learning_rates=[float(rate) for rate in options.lr.split(',') if rate.strip()],
-                       sharpness=options.sharpness, t_norm=options.tnorm)
+                       learning_rates=rates, sharpness=options.sharpness, t_norm=options.tnorm,
+                       bindings=bindings, binding_weight=options.binding_weight,
+                       membership_mode=options.membership_mode, output=options.output)
 
 
 if __name__ == '__main__':

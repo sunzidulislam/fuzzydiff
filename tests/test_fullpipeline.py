@@ -155,6 +155,57 @@ class NotebookRegressionTests(unittest.TestCase):
         # An empty map must not divide by zero.
         self.assertTrue(torch.isfinite(self.code['relative_membership'](torch.zeros(3))).all())
 
+    def test_relative_phrase_membership_allows_attribute_and_object_to_overlap(self):
+        # Hand-built attention: both phrases peak on the same two car pixels.
+        # Token-share membership cannot give both phrases high membership there.
+        attention = torch.tensor([[[0.01, 0.4, 0.5, 0.09],
+                                   [0.01, 0.2, 0.25, 0.54],
+                                   [0.01, 0.04, 0.05, 0.9],
+                                   [0.01, 0.0, 0.0, 0.99]]])
+        for token in (1, 2):
+            membership = self.code['phrase_membership'](
+                attention, [token], (1, 4), mode='relative')
+            self.assertTrue(torch.allclose(membership, torch.tensor([[1., 0.5, 0.1, 0.]])))
+        default = self.code['phrase_membership'](attention, [1], (1, 4))
+        explicit = self.code['phrase_membership'](attention, [1], (1, 4), mode='share')
+        self.assertTrue(torch.equal(default, explicit))
+
+    def test_relative_membership_handles_empty_maps_and_rejects_unknown_mode(self):
+        attention = torch.zeros(1, 4, 3)
+        membership = self.code['phrase_membership'](attention, [1], mode='relative')
+        self.assertTrue(torch.equal(membership, torch.zeros(1, 4)))
+        with self.assertRaises(ValueError):
+            self.code['phrase_membership'](attention, [1], mode='unknown')
+
+    def test_relative_binding_has_finite_gradients_for_both_phrases(self):
+        attention = torch.tensor([[[0.1, 0.6, 0.2, 0.1], [0.1, 0.3, 0.4, 0.2],
+                                   [0.1, 0.1, 0.6, 0.2], [0.1, 0.2, 0.1, 0.6]]],
+                                 requires_grad=True)
+        loss = self.code['compute_fuzzy_loss'](
+            {'down_cross': attention}, [[1], [2]], text_span=(1, 4),
+            relations=[([1], 'bound_to', [2])], t_norm='product', membership_mode='relative')
+        gradient = torch.autograd.grad(loss, attention)[0]
+        self.assertTrue(torch.isfinite(gradient).all())
+        for token in (1, 2):
+            self.assertGreater(gradient[..., token].abs().sum().item(), 0)
+
+    def test_relative_scores_and_refinement_masks_use_the_selected_mode(self):
+        store = self.code['AttentionStore'](attn_res=2)
+        store.token_groups = {'dusty': [1], 'car': [2]}
+        store.text_span = (1, 4)
+        store.membership_mode = 'relative'
+        attention = torch.tensor([[[0.01, 0.4, 0.5, 0.09], [0.01, 0.2, 0.25, 0.54],
+                                   [0.01, 0.04, 0.05, 0.9], [0.01, 0.0, 0.0, 0.99]]])
+        store.begin_forward()
+        store.forward(attention, True, 'down')
+        store.end_forward()
+        truths = self.code['phrase_truth_scores'](store)
+        self.assertAlmostEqual(truths['dusty'], truths['car'], places=6)
+        self.assertGreater(truths['dusty'], 0.99)
+        masks = self.code['build_phrase_membership_masks'](store, torch.device('cpu'), latent_size=2)
+        self.assertTrue(torch.allclose(masks['dusty'], torch.tensor([[1., 0.5], [0.1, 0.]])))
+        self.assertTrue(torch.allclose(masks['dusty'], masks['car']))
+
     def test_binding_rewards_overlapping_attribute_and_object_support(self):
         # The object occupies the top half. The attribute lands either on the same
         # half (bound) or on the opposite half (leaked onto something else).
@@ -324,9 +375,9 @@ class NotebookRegressionTests(unittest.TestCase):
             unet.enable_gradient_checkpointing()
             indices = code['get_token_indices'](tokenizer, 'a cat', ['cat'])
 
-            def sample(updates):
+            def sample(updates, membership_mode='share'):
                 config = code['RunConfig'](prompt='a cat', height=64, width=64, n_inference_steps=2,
-                    max_iter_to_alter=updates, output_path=path)
+                    max_iter_to_alter=updates, output_path=path, membership_mode=membership_mode)
                 store = code['AttentionStore'](attn_res=4)
                 pipeline.register_attention_control(store)
                 output = pipeline(prompt='a cat', height=64, width=64, num_inference_steps=2,
@@ -354,6 +405,12 @@ class NotebookRegressionTests(unittest.TestCase):
             self.assertFalse(store.step_store, 'Guidance graphs remained in the collector')
             self.assertTrue(all(not value.requires_grad and value.device.type == 'cpu'
                                 for value in store.get_average_attention().values()))
+            relative, relative_store = sample(1, 'relative')
+            self.assertTrue(torch.isfinite(relative).all())
+            self.assertGreater(relative_store.guidance_diagnostics[0]['update_rms'], 0)
+            self.assertNotAlmostEqual(relative_store.guidance_diagnostics[0]['loss'],
+                                      store.guidance_diagnostics[0]['loss'], places=5,
+                                      msg='SDXL ignored the selected membership mode')
             # Exercise inherited VAE decode/postprocessing as well as the latent path.
             config = code['RunConfig'](height=64, width=64, n_inference_steps=1, max_iter_to_alter=0, output_path=path)
             result = pipeline(prompt='a cat', height=64, width=64, num_inference_steps=1, guidance_scale=1,
