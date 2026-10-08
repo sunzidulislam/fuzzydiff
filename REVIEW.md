@@ -233,3 +233,47 @@ membership truth. `--compare` now records `phrase_truth` per run and accepts
 `--prompt`, `--words`, `--seed` and a comma-separated `--lr` sweep, so guidance-off
 truths can be compared against each step size on a prompt that native SDXL fails.
 No improvement is claimed until that comparison exists.
+
+## Measured on GPU: four-way comparison, "A slightly dusty red sports car parked on a road."
+
+Seed 42, base stage only, `{SD 1.5, SDXL} x {no fuzzy, FuzzyDiff}` at the shipped
+settings. The arms were not separable, and the diagnostics say why rather than leaving
+it open.
+
+SDXL phrase truths were identical to four decimal places with guidance on and off:
+`slightly dusty` 0.98974 against 0.98969, `red sports car` 0.35240 against 0.35231,
+`road` 0.00116 against 0.00119. Three causes, two now addressed.
+
+1. **The Goedel t-norm starved the attribute.** `loss = -log(min truth) = -log(0.00116)
+   = 6.76`, matching the recorded loss exactly, so every gradient went to `road` and
+   `slightly dusty` received none across all 30 updates. `compute_fuzzy_loss` now takes
+   `t_norm`, with `product` summing `-log truth` so every phrase is optimised.
+2. **Membership was binary, not graded.** At `membership_sharpness` 100 the
+   per-position softmax is winner-take-all: one phrase saturates near 1, another
+   collapses near 0, and a saturated softmax has zero gradient. That contradicts the
+   abstract's "graded truth values rather than binary constraints". Sharpness is now a
+   flag on both runners; a regression test pins that a binding conjunct carries
+   gradient at sharpness 5 and none at 100.
+3. **Attention presence is not visual intensity.** `slightly dusty` scored 0.99, so the
+   objective considered it satisfied while the rendered car was clean and glossy.
+   Raising attention on an adjective's tokens does not control how strongly the
+   attribute is rendered, and the score was already at ceiling, so no step size could
+   help. This is not fixed and may not be fixable by attention-only guidance.
+   Relatedly, `road` scored 0.00116 while a road is plainly visible, so low membership
+   does not mean absent and high membership does not mean rendered: `phrase_truth`
+   must not be reported as evidence of visual faithfulness.
+
+## Attribute-object binding
+
+Added in response to (3): rather than treating each phrase as an independent presence
+objective, `bound_to` requires an attribute to be grounded where its object is, as a
+fuzzy AND over the two membership maps. Each map is rescaled to its own peak first
+(`relative_membership`, shared with the refinement masks) because memberships are
+shares of one per-position distribution and cannot both be high at one position in raw
+form; the predicate therefore compares spatial support, which is exactly what attribute
+leakage violates. Exposed as `--bind "attribute>object"` and `--binding-weight`.
+
+This targets attribute leakage in multi-object prompts, a reproducible backbone
+failure. It does not create attribute intensity that the backbone never renders, so it
+is not expected to fix the dusty-car example; that example is better replaced than
+rescued.

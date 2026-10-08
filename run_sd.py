@@ -15,6 +15,8 @@ are comparable across backbones at the same seed and step count.
 
     python run_sd.py --prompt "a red book and a yellow clock" --words "red book,yellow clock"
     python run_sd.py --prompt "a red book and a yellow clock" --words "red book,yellow clock" --fuzzy
+    python run_sd.py --prompt "a red book and a yellow clock" --words "red,book,yellow,clock" \
+        --fuzzy --bind "red>book" --bind "yellow>clock"
 """
 import argparse
 import json
@@ -75,7 +77,8 @@ class FuzzyStableDiffusionPipeline(StableDiffusionPipeline):
                                                         cfg.token_groups, cfg.alpha,
                                                         cfg.spatial_loss_weight, relations,
                                                         cfg.text_span, cfg.membership_sharpness,
-                                                        getattr(cfg, 't_norm', 'min'))
+                                                        getattr(cfg, 't_norm', 'min'),
+                                                        getattr(cfg, 'binding_loss_weight', 1.0))
                 if not loss.requires_grad:
                     raise RuntimeError('Fuzzy loss is disconnected from the latent graph.')
                 gradient = torch.autograd.grad(loss, leaf)[0]
@@ -180,12 +183,34 @@ def build_config(fuzzy, tokenizer, prompt, words, seed, output_path, steps=50, g
     return cfg, groups
 
 
-def generate_fuzzy(pipeline, fuzzy, cfg, groups, negative_prompt=''):
+def resolve_bindings(groups, bindings):
+    """Turn ('attribute', 'object') phrase pairs into token-group relations."""
+    relations = []
+    for attribute, obj in bindings:
+        for phrase in (attribute, obj):
+            if phrase not in groups:
+                raise ValueError(f'Binding operand {phrase!r} is not a tracked phrase; add it to --words.')
+        relations.append((groups[attribute], 'bound_to', groups[obj]))
+    return relations
+
+
+def parse_bindings(values):
+    """Parse --bind "attribute>object" arguments."""
+    bindings = []
+    for value in values or ():
+        attribute, separator, obj = value.partition('>')
+        if not separator or not attribute.strip() or not obj.strip():
+            raise ValueError(f'--bind expects "attribute>object", got {value!r}.')
+        bindings.append((attribute.strip(), obj.strip()))
+    return bindings
+
+
+def generate_fuzzy(pipeline, fuzzy, cfg, groups, negative_prompt='', relations=()):
     store = fuzzy['AttentionStore'](attn_res=cfg.attn_res)
     store.token_groups = groups
     store.text_span = cfg.text_span
     pipeline.register_attention_control(store)
-    return pipeline.sample(cfg, store, negative_prompt=negative_prompt), store
+    return pipeline.sample(cfg, store, relations=relations, negative_prompt=negative_prompt), store
 
 
 def generate_plain(pipeline, prompt, seed, steps=50, guidance=7.5, size=512, negative_prompt=''):
@@ -224,6 +249,11 @@ def main():
                         help='Membership sharpness; lower keeps truths graded instead of near-binary.')
     parser.add_argument('--tnorm', choices=('min', 'product'), default='min',
                         help="Fuzzy conjunction: 'min' gradients only the weakest phrase, 'product' all of them.")
+    parser.add_argument('--bind', action='append', metavar='ATTR>OBJECT',
+                        help='Require an attribute to hold where an object is, e.g. '
+                             '--bind "yellow>clock". Both sides must be tracked phrases.')
+    parser.add_argument('--binding-weight', type=float, default=1.0,
+                        help='Weight of each binding conjunct in the loss.')
     parser.add_argument('--negative', default='', help='Negative prompt.')
     parser.add_argument('--output', default=None, help='Output directory.')
     options = parser.parse_args()
@@ -251,8 +281,12 @@ def main():
         cfg, groups = build_config(fuzzy, pipeline.tokenizer, options.prompt, words, options.seed,
                                    output, options.steps, options.guidance, options.size,
                                    options.lr, options.updates, options.sharpness, options.tnorm)
+        cfg.binding_loss_weight = options.binding_weight
+        relations = resolve_bindings(groups, parse_bindings(options.bind))
         print('Tracked phrase tokens:', groups, flush=True)
-        image, store = generate_fuzzy(pipeline, fuzzy, cfg, groups, options.negative)
+        if relations:
+            print('Bindings:', parse_bindings(options.bind), flush=True)
+        image, store = generate_fuzzy(pipeline, fuzzy, cfg, groups, options.negative, relations)
         truths = fuzzy['phrase_truth_scores'](store, cfg.alpha, cfg.membership_sharpness)
         diagnostics = store.guidance_diagnostics
         settings = {**asdict(cfg), 'output_path': str(cfg.output_path)}

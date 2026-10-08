@@ -142,8 +142,17 @@ if you want to keep them.
 To run interactively, import the main notebook into Kaggle and run top to bottom.
 Set `SMOKE_TEST = False` in its final cell for a full run. Change prompt, tracked
 phrases, seeds, negative prompt and optional relations there. Supported explicit
-relations are `left_of`, `right_of`, `above`, `below`; no spatial constraint is
-added automatically. Model-loading cells must be rerun after the final cell unloads
+relations are `left_of`, `right_of`, `above`, `below` and `bound_to`; no constraint is
+added automatically.
+
+`bound_to` is the attribute-object binding predicate: `("yellow", "bound_to", "clock")`
+requires the attribute to be grounded where the object is. It is a fuzzy AND over the
+two phrases' membership maps, each rescaled to its own peak first, because memberships
+are shares of one per-position distribution and so can never both be high at the same
+position in raw form. Binding is what attribute leakage violates, and both runners
+expose it as `--bind "yellow>clock"` with `--binding-weight` for its loss weight.
+Lower `--sharpness` when using it: at the default of 100 the membership softmax
+saturates and a binding conjunct carries no gradient. Model-loading cells must be rerun after the final cell unloads
 the base pipeline.
 
 The loss guides phrase presence and configured 2D relations. It does not calibrate

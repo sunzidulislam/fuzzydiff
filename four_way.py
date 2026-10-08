@@ -76,7 +76,8 @@ def unload(pipeline):
 
 def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2, updates=30,
                  sd_model='stable-diffusion-v1-5/stable-diffusion-v1-5', negative='',
-                 sdxl_guidance=9.5, sd_guidance=7.5, sharpness=100.0, t_norm='min', output=None):
+                 sdxl_guidance=9.5, sd_guidance=7.5, sharpness=100.0, t_norm='min',
+                 bindings=(), binding_weight=1.0, output=None):
     words = list(words)
     directory = Path(output) if output else (
         (Path('/kaggle/working/outputs') if Path('/kaggle/working').exists()
@@ -86,6 +87,8 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
               'stage': 'base only, no refinement',
               'settings': {'steps': steps, 'fuzzy_lr': learning_rate, 'guided_steps': updates,
                            'membership_sharpness': sharpness, 't_norm': t_norm,
+                           'bindings': [list(pair) for pair in bindings],
+                           'binding_weight': binding_weight,
                            'sdxl_guidance': sdxl_guidance, 'sd_guidance': sd_guidance,
                            'sdxl_size': 768, 'sd_size': 512, 'sd_model': sd_model,
                            'negative_prompt': negative},
@@ -117,8 +120,10 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
             image, _, store = namespace['generate'](
                 prompt, words, seed=seed, num_steps=steps, guidance=sdxl_guidance,
                 height=768, width=768, max_iter_to_alter=guided, attend_excite_lr=learning_rate,
-                negative_prompt=negative, relations=[], membership_sharpness=sharpness,
-                t_norm=t_norm, pipeline=pipeline)
+                negative_prompt=negative,
+                relations=[(attribute, 'bound_to', obj) for attribute, obj in bindings],
+                membership_sharpness=sharpness, t_norm=t_norm,
+                binding_loss_weight=binding_weight, pipeline=pipeline)
             record(name, image, store, namespace['phrase_truth_scores'](store))
     finally:
         pipeline.unet.set_attn_processor(original_processors)
@@ -131,7 +136,11 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
     torch.cuda.empty_cache()
 
     # --- SD 1.5 arms ---
+    # Reload as well as import: a long-lived kernel would otherwise serve the copy
+    # of run_sd that was cached before the last git pull.
+    import importlib
     import run_sd
+    importlib.reload(run_sd)
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     fuzzy = run_sd.load_fuzzy_definitions()
     print('Loading', sd_model, flush=True)
@@ -151,7 +160,9 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
         cfg, groups = run_sd.build_config(fuzzy, sd_pipeline.tokenizer, prompt, words, seed,
                                           directory, steps, sd_guidance, 512,
                                           learning_rate, updates, sharpness, t_norm)
-        image, store = run_sd.generate_fuzzy(sd_pipeline, fuzzy, cfg, groups, negative)
+        cfg.binding_loss_weight = binding_weight
+        image, store = run_sd.generate_fuzzy(sd_pipeline, fuzzy, cfg, groups, negative,
+                                             run_sd.resolve_bindings(groups, bindings))
         record('sd15_fuzzy', image, store,
                fuzzy['phrase_truth_scores'](store, cfg.alpha, cfg.membership_sharpness))
     finally:

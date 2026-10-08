@@ -69,6 +69,18 @@ class StableDiffusionBackboneTests(unittest.TestCase):
         self.assertEqual(run_sd.missing_words(tokenizer, PROMPT, WORDS), [])
         self.assertEqual(run_sd.missing_words(tokenizer, PROMPT, ['red book', 'oak']), ['oak'])
 
+    def test_bindings_parse_and_resolve_to_token_groups(self):
+        self.assertEqual(run_sd.parse_bindings(['yellow>clock', ' red > book ']),
+                         [('yellow', 'clock'), ('red', 'book')])
+        for bad in ('yellowclock', '>clock', 'yellow>'):
+            with self.assertRaises(ValueError):
+                run_sd.parse_bindings([bad])
+        groups = {'yellow': [1], 'clock': [2, 3]}
+        self.assertEqual(run_sd.resolve_bindings(groups, [('yellow', 'clock')]),
+                         [([1], 'bound_to', [2, 3])])
+        with self.assertRaises(ValueError):
+            run_sd.resolve_bindings(groups, [('yellow', 'book')])
+
     def test_guidance_changes_a_seeded_image_and_records_diagnostics(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)

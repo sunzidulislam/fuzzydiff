@@ -131,6 +131,59 @@ class NotebookRegressionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.code['compute_fuzzy_loss'](maps, [0, 1], t_norm='lukasiewicz')
 
+    def test_relative_membership_rescales_to_its_own_peak(self):
+        membership = torch.tensor([0.0, 0.1, 0.4])
+        relative = self.code['relative_membership'](membership)
+        self.assertAlmostEqual(relative.max().item(), 1.0, places=6)
+        self.assertAlmostEqual(relative[1].item(), 0.25, places=6)
+        # An empty map must not divide by zero.
+        self.assertTrue(torch.isfinite(self.code['relative_membership'](torch.zeros(3))).all())
+
+    def test_binding_rewards_overlapping_attribute_and_object_support(self):
+        # The object occupies the top half. The attribute lands either on the same
+        # half (bound) or on the opposite half (leaked onto something else).
+        context = 8
+        span = (1, context - 1)
+        relations = [([1], 'bound_to', [2])]
+
+        def loss_for(attribute_rows):
+            logits = torch.full((1, 4, context), -2.0)
+            logits[:, attribute_rows, 1] = 4.0
+            logits[:, [0, 1], 2] = 4.0
+            return self.code['compute_fuzzy_loss']({'down_cross': logits.softmax(-1)},
+                                                   [[1], [2]], relations=relations,
+                                                   text_span=span)
+
+        bound = loss_for([0, 1])
+        leaked = loss_for([2, 3])
+        self.assertLess(bound.item(), leaked.item(),
+                        'Binding did not penalise an attribute grounded away from its object')
+
+    def test_binding_gradient_reaches_both_operands(self):
+        # Binding has to optimise the attribute even when another phrase is the
+        # weakest conjunct under the Goedel t-norm. Sharpness matters here: a
+        # saturated membership softmax has exactly zero gradient, so a binding at
+        # the default sharpness of 100 cannot be optimised at all.
+        context = 8
+        logits = torch.full((1, 4, context), -2.0)
+        logits[:, [2, 3], 1] = 4.0
+        logits[:, [0, 1], 2] = 4.0
+
+        def binding_gradient(sharpness):
+            attention = logits.softmax(-1).requires_grad_(True)
+            loss = self.code['compute_fuzzy_loss']({'down_cross': attention}, [[1], [2]],
+                                                   relations=[([1], 'bound_to', [2])],
+                                                   text_span=(1, context - 1),
+                                                   membership_sharpness=sharpness)
+            return torch.autograd.grad(loss, attention)[0]
+
+        gradient = binding_gradient(5.0)
+        self.assertTrue(torch.isfinite(gradient).all())
+        self.assertGreater(gradient[..., 1].abs().sum().item(), 0)
+        self.assertGreater(gradient[..., 2].abs().sum().item(), 0)
+        self.assertEqual(binding_gradient(100.0)[..., 1].abs().sum().item(), 0.0,
+                         'Saturated membership is expected to carry no gradient')
+
     def test_attention_aggregation_handles_small_and_large_maps(self):
         store = self.code['AttentionStore'](attn_res=4)
         if hasattr(store, 'begin_forward'):

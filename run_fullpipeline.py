@@ -19,6 +19,11 @@ def main():
                         help='Membership sharpness; lower keeps truths graded instead of near-binary.')
     parser.add_argument('--tnorm', choices=('min', 'product'), default='min',
                         help="Fuzzy conjunction: 'min' gradients only the weakest phrase, 'product' all of them.")
+    parser.add_argument('--bind', action='append', metavar='ATTR>OBJECT',
+                        help='Require an attribute to hold where an object is, e.g. '
+                             '--bind "yellow>clock". Both sides must be tracked phrases.')
+    parser.add_argument('--binding-weight', type=float, default=1.0,
+                        help='Weight of each binding conjunct in the loss.')
     parser.add_argument('--lr', default='0.2',
                         help='Comma-separated guidance step sizes; --compare renders one image per value.')
     options = parser.parse_args()
@@ -44,12 +49,16 @@ def main():
         print(f'Compiled {count} code cells successfully.')
     elif options.four_way:
         import four_way
+        import run_sd
+        importlib.reload(run_sd)
         importlib.reload(four_way)
         four_way.run_four_way(namespace, prompt=options.prompt,
                               words=[word.strip() for word in options.words.split(',') if word.strip()],
                               seed=options.seed,
                               learning_rate=float(options.lr.split(',')[0]),
-                              sharpness=options.sharpness, t_norm=options.tnorm)
+                              sharpness=options.sharpness, t_norm=options.tnorm,
+                              bindings=run_sd.parse_bindings(options.bind),
+                              binding_weight=options.binding_weight)
     elif options.compare:
         # %run reuses the kernel, so a module imported before a git pull would be
         # served from sys.modules; reload so the file on disk is what runs.
