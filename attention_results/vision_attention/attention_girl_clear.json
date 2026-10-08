@@ -1,0 +1,10 @@
+{
+  "source_attention": "attention_results/vision_attention/raw_attention.npz",
+  "head": 4,
+  "layer_index": 11,
+  "heatmap_alpha": 0.4,
+  "scale": 3,
+  "normalization": "min-max",
+  "attention_interpolation": "bilinear",
+  "note": "Head selected to show the girl; not the average. Upscaling adds no model resolution."
+}

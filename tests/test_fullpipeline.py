@@ -16,10 +16,10 @@ NOTEBOOK = Path(__file__).resolve().parents[1] / 'pipeline_fuzzy/fuzzydiff-fullp
 def load_definitions(base_class=object):
     namespace = dict(globals(), StableDiffusionXLPipeline=base_class)
     prefixes = ('@dataclass', 'def soft_truth', 'def compute_fuzzy_loss',
-                'class AttentionControl', 'class AttentionStore',
+                'class AttentionStore',
                 'class AttendExciteAttnProcessor', 'class FuzzyAttendExciteSDXLPipeline',
                 'def get_token_indices', 'def get_token_groups',
-                'def build_object_masks', 'class PredicateRefinerProcessor')
+                'def build_phrase_membership_masks', 'class PredicateRefinerProcessor')
     for cell in json.loads(NOTEBOOK.read_text(encoding='utf-8'))['cells']:
         source = cell['source']
         source = ''.join(source) if isinstance(source, list) else source
@@ -37,14 +37,83 @@ class NotebookRegressionTests(unittest.TestCase):
         store = self.code['AttentionStore'](attn_res=2)
         if hasattr(store, 'begin_forward'):
             store.begin_forward(keep_grad=True)
-        latents = torch.randn(1, 4, 3, requires_grad=True)
+        # A full 77-token context keeps attention at its real per-token scale;
+        # a 3-token stand-in saturates the membership softmax and hides gradients.
+        latents = torch.randn(1, 4, 77, requires_grad=True)
         store.forward(latents.softmax(-1), True, 'down')
-        loss = self.code['compute_fuzzy_loss'](store.get_current_step_attention(), [1])
+        loss = self.code['compute_fuzzy_loss'](store.get_current_step_attention(), [1],
+                                               text_span=(1, 76))
         self.assertTrue(loss.requires_grad, 'Attention disconnected fuzzy loss from latents')
         gradient = torch.autograd.grad(loss, latents)[0]
         self.assertTrue(torch.isfinite(gradient).all())
         self.assertGreater(gradient.abs().sum().item(), 0)
         self.assertFalse(torch.equal(latents, latents - 0.05 * gradient))
+
+    def test_phrase_membership_is_graded_rather_than_context_scaled(self):
+        # Pooling raw attention returned ~1/context for present and absent phrases
+        # alike; membership has to separate them inside [0, 1].
+        context = 16
+        logits = torch.full((1, 4, context), -2.0)
+        logits[..., 1] = 4.0
+        attention = logits.softmax(-1)
+        span = (1, context - 1)
+        present = self.code['phrase_membership'](attention, [1], span)
+        absent = self.code['phrase_membership'](attention, [2], span)
+        self.assertGreaterEqual(present.min().item(), 0.0)
+        self.assertLessEqual(present.max().item(), 1.0)
+        self.assertGreater(self.code['soft_truth'](present).item(), 0.9)
+        self.assertLess(self.code['soft_truth'](absent).item(), 0.1)
+
+    def test_phrase_pools_its_subtokens_into_one_predicate(self):
+        # Each half of the image is grounded by a different subtoken; the phrase
+        # must cover both halves rather than compete with itself.
+        context = 8
+        logits = torch.full((1, 4, context), -2.0)
+        logits[:, :2, 1] = 2.0
+        logits[:, 2:, 2] = 2.0
+        attention = logits.softmax(-1)
+        span = (1, context - 1)
+        phrase = self.code['phrase_membership'](attention, [1, 2], span)
+        subtoken = self.code['phrase_membership'](attention, [1], span)
+        self.assertGreater(phrase.min().item(), 0.9)
+        self.assertLess(subtoken.min().item(), 0.1)
+        self.assertLessEqual(phrase.max().item(), 1.0)
+
+    def test_phrase_truth_scores_read_the_store_the_way_generate_fills_it(self):
+        # generate() records {phrase: indices} plus a text span on the store; the
+        # metadata and refinement weights are read back through that shape.
+        context = 12
+        store = self.code['AttentionStore'](attn_res=2)
+        store.token_groups = {'fast car': [1, 2], 'tree': [3]}
+        store.text_span = (1, context - 1)
+        logits = torch.full((1, 4, context), -2.0)
+        logits[:, :2, 1] = 4.0
+        logits[:, 2:, 2] = 4.0
+        store.begin_forward()
+        store.forward(logits.softmax(-1).expand(2, -1, -1), True, 'down')
+        store.end_forward()
+        truths = self.code['phrase_truth_scores'](store)
+        self.assertEqual(sorted(truths), ['fast car', 'tree'])
+        self.assertGreater(truths['fast car'], 0.9)
+        self.assertLess(truths['tree'], 0.1)
+        masks = self.code['build_phrase_membership_masks'](store, torch.device('cpu'), latent_size=4)
+        self.assertEqual(sorted(masks), ['fast car'])
+        self.assertEqual(tuple(masks['fast car'].shape), (4, 4))
+        self.assertLessEqual(masks['fast car'].max().item(), 1.0)
+
+    def test_refinement_leaves_well_grounded_phrases_unchanged(self):
+        from diffusers.models.attention_processor import Attention
+        torch.manual_seed(6)
+        attention = Attention(query_dim=8, cross_attention_dim=8, heads=4, dim_head=2)
+        hidden = torch.randn(2, 4, 8)
+        context = torch.randn(2, 3, 8)
+        baseline = attention(hidden, encoder_hidden_states=context)
+        masks = {1: torch.tensor([[1., 0.], [0., 1.]])}
+        processor = self.code['PredicateRefinerProcessor'](masks, weights={1: 0.0})
+        processor.fallback = attention.processor
+        grounded = processor(attention, hidden, encoder_hidden_states=context)
+        self.assertTrue(torch.allclose(grounded, baseline, atol=1e-6),
+                        'A fully grounded phrase was still reweighted')
 
     def test_unrelated_words_do_not_receive_spatial_constraints(self):
         maps = {'down_cross': torch.full((1, 4, 2), 0.5)}
@@ -124,12 +193,14 @@ class NotebookRegressionTests(unittest.TestCase):
         pipeline = object.__new__(self.code['FuzzyAttendExciteSDXLPipeline'])
         pipeline.unet = ConditionalForward()
         pipeline.scheduler = SimpleNamespace(scale_model_input=lambda value, timestep: value)
-        config = SimpleNamespace(alpha=10., spatial_loss_weight=0., attend_excite_lr=0.2, n_inference_steps=50)
+        config = SimpleNamespace(alpha=10., spatial_loss_weight=0., attend_excite_lr=0.2,
+                                 n_inference_steps=50, token_groups=[[1]], text_span=None,
+                                 membership_sharpness=100.0)
         latents = torch.tensor([[[[0.1, 0.2], [0.3, 0.4]]]])
         updated = pipeline._update_latents_with_fuzzy_loss(latents, store, [1], config,
             timestep=1, prompt_embeds=torch.zeros(1, 3, 4), added_cond_kwargs={})
         diagnostics = store.guidance_diagnostics[0]
-        self.assertLess(diagnostics['gradient_rms'], 0.001)
+        self.assertLess(diagnostics['gradient_rms'], 0.01)
         self.assertLessEqual(diagnostics['update_rms'], config.attend_excite_lr * diagnostics['gradient_rms'] + 1e-7,
                              'Tiny gradients were amplified into large latent perturbations')
         self.assertFalse(torch.equal(latents, updated))

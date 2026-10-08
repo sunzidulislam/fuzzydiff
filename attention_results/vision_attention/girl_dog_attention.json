@@ -1,0 +1,14 @@
+{
+  "source_attention": "attention_results/vision_attention/raw_attention.npz",
+  "heads": [
+    1,
+    4
+  ],
+  "layer_index": 11,
+  "heatmap_alpha": 0.45,
+  "scale": 3,
+  "normalization": "min-max",
+  "attention_interpolation": "bilinear",
+  "aggregation": "Mean of per-head min-max-normalized weights",
+  "note": "Selected heads, not the all-head average. Upscaling adds no model resolution."
+}

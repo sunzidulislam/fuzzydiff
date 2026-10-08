@@ -41,6 +41,14 @@ class StudyTests(unittest.TestCase):
                 'snow_experiment.py': '14561514686917a6078271b2801afc12f3b68779cb529c9f5970ef0fc91840e7',
                 'pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb': 'dc0be5b2c7b0905f4aa3aa82fd85501fc13c4ec154c76d50a4cd587adc0dac91',
             }
+            # The allowlisted repair is frozen to those historical fingerprints. The
+            # live tree deliberately no longer matches them, so the upgrade path is
+            # exercised with the fingerprints it was written for.
+            current['code_sha256'] = {
+                'snow_gpu.py': '7af010bfc6ab5404b7cfaffe46bd234d37a12f81274f692dd89662fb09cbe0ea',
+                'snow_experiment.py': '14561514686917a6078271b2801afc12f3b68779cb529c9f5970ef0fc91840e7',
+                'pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb': 'dc0be5b2c7b0905f4aa3aa82fd85501fc13c4ec154c76d50a4cd587adc0dac91',
+            }
             job = jobs_for(previous)[0]
             manifest = {'design': previous, 'scope': 'pilot', 'runs': {
                 job['id']: {'job': job, 'status': 'failed', 'attempts': [
@@ -54,6 +62,25 @@ class StudyTests(unittest.TestCase):
             self.assertEqual(result['design'], current)
             self.assertEqual(result['code_upgrades'][0]['from'], previous['code_sha256'])
             self.assertEqual(json.loads((root / 'review_key.json').read_text())['design'], current)
+
+    def test_resume_refuses_a_changed_generation_algorithm(self):
+        # Phrase membership changed how guided images are produced, so a manifest
+        # from the previous algorithm must not be topped up in place.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            current = make_design()
+            previous = json.loads(json.dumps(current))
+            previous['code_sha256'] = {
+                'snow_gpu.py': '7d48b27b7f334bf5cf8011881cdc62b45c76073a7862c25ec608bcc9c0e99f95',
+                'snow_experiment.py': '14561514686917a6078271b2801afc12f3b68779cb529c9f5970ef0fc91840e7',
+                'pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb': 'dc0be5b2c7b0905f4aa3aa82fd85501fc13c4ec154c76d50a4cd587adc0dac91',
+            }
+            job = jobs_for(previous)[0]
+            (root / 'manifest.json').write_text(json.dumps(
+                {'design': previous, 'scope': 'pilot', 'phase_times': [],
+                 'runs': {job['id']: {'job': job, 'status': 'pending', 'attempts': []}}}))
+            with self.assertRaises(ValueError):
+                run_study(root, current, FakeBackend())
 
     def test_design_counts_and_matched_prompts(self):
         design = make_design()

@@ -40,6 +40,7 @@ def notebook_cells():
 def save_attention(path, store):
     import torch
     payload = {'attn_res': store.attn_res, 'token_groups': store.token_groups,
+               'text_span': getattr(store, 'text_span', None),
                'averages': {k: v.detach().cpu() for k, v in store.get_average_attention().items()},
                'diagnostics': store.guidance_diagnostics}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -53,6 +54,9 @@ def load_attention(path, store_type):
     payload = torch.load(path, map_location='cpu', weights_only=True)
     store = store_type(attn_res=payload['attn_res'])
     store.token_groups = payload['token_groups']
+    # Checkpoints written before phrase membership have no span; those resume with
+    # membership taken over the whole context instead of the prompt tokens only.
+    store.text_span = payload.get('text_span')
     store.attention_store = payload['averages']
     store.counts = {key: 1 for key in store.attention_store}
     store.guidance_diagnostics = payload['diagnostics']
@@ -159,14 +163,14 @@ class SnowBackend:
             pipeline = self.base
         else:
             store = load_attention(root / job['attention'], self.namespace['AttentionStore'])
-            indices = sorted({idx for group in store.token_groups.values() for idx in group})
             source = root / f"images/{job['dependency']}.png"
             with Image.open(source) as base_image:
                 image = self.namespace['refine_with_predicate'](
-                    base_image.convert('RGB'), job['prompt'], store, indices, seed=job['seed'],
+                    base_image.convert('RGB'), job['prompt'], store, seed=job['seed'],
                     negative_prompt=s['negative_prompt'], refiner=self.refiner,
                     strength=s['refiner_strength'], num_steps=s['refiner_steps'],
-                    guidance=s['guidance'], predicate_strength=s['predicate_strength'])
+                    guidance=s['guidance'], predicate_strength=s['predicate_strength'],
+                    alpha=s['alpha'], membership_sharpness=s.get('membership_sharpness', 100.0))
             metadata.update(token_groups=store.token_groups,
                             refiner_token_groups=self.namespace['get_token_groups'](
                                 self.refiner.tokenizer_2, job['prompt'], s['words_to_track']))

@@ -1,0 +1,21 @@
+{
+  "model": "facebook/dino-vits16",
+  "revision": "abe3b354cb6a9b6f146096b14a4a9d7eecbcb4bd",
+  "input_sha256": "306168f3a9211e7765bb2d0b1d722c9bcdd34438956283caaa3cf93123f40024",
+  "method": "Final transformer layer, CLS query to image patch keys, mean over all heads",
+  "layer_index": 11,
+  "heads": 6,
+  "patch_grid": [
+    14,
+    14
+  ],
+  "model_input_size": [
+    224,
+    224
+  ],
+  "display": "Min-max scaling of mean patch weights; bilinear resize; JET colormap",
+  "overlay_heatmap_alpha": 0.6,
+  "torch": "2.7.1+cpu",
+  "transformers": "4.56.2",
+  "limitation": "Self-attention is not a hand mask, class-specific attribution, or SDXL cross-attention."
+}

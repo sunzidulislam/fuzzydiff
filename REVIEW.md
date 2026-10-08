@@ -95,3 +95,117 @@ float32 latents. Native/custom comparisons therefore include precision differenc
 the custom guidance-off/on pair isolates the guidance correction. Small accumulated
 float32 updates are preserved between steps, but individual updates may not immediately
 cross the fp16 UNet input's rounding threshold.
+
+---
+
+# Review: 2026-10-08, against the revised abstract
+
+Scope: the whole current `pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb`, as requested,
+not a Git diff. Specification: the revised paper abstract supplied by the author,
+whose methodology claims are phrase-level spatial membership functions, differentiable
+graded truth values, and a spatially guided attention refinement that corrects
+residual omissions. No repository standards document or issue tracker exists, so the
+standards axis used the Fowler smell baseline.
+
+## Spec
+
+1. **Membership functions were missing, and the truth values were not graded
+   (fixed).** `soft_truth` pooled raw cross-attention, whose per-token scale is set
+   by the 77-token context. With `alpha = 10` the softmax weighting is nearly
+   uniform at that scale, so the "graded truth value" was approximately the mean
+   attention, about `0.015`, for a grounded and an absent phrase alike; the
+   simulated spread between them was `0.0152` against a true map maximum of
+   `0.0823`. The loss `-log(score)` therefore sat near `4.2` regardless of whether
+   the prompt was satisfied, which is the direct cause of the `1e-5` gradients
+   recorded in the earlier follow-up. `phrase_membership` now converts attention
+   into a membership function in `[0, 1]`: the phrase's share of the sharpened
+   per-position distribution over the prompt's own tokens. On a CPU fixture with a
+   realistic 77-token context the loss moves between `0.75` (grounded) and `4.26`
+   (weak) and gradient RMS rises from `1e-5` to `1.3e-3`-`5e-2`.
+2. **Presence was token-level, not phrase-level (fixed).** `compute_fuzzy_loss`
+   took a flat index list and applied `min` across every subtoken, so a multi-token
+   phrase became several competing constraints. It now takes phrase groups and pools
+   a phrase's subtokens into one membership map (a bounded fuzzy union) before the
+   Goedel t-norm combines phrases.
+3. **Refinement did not target residual omissions (fixed).** Every tracked phrase
+   received the same `predicate_strength`, with no notion of which phrase the base
+   stage left weakly grounded. `phrase_truth_scores` now reports presence truth per
+   phrase, and each phrase's attention correction is scaled by its membership
+   deficit `1 - truth`, so a grounded phrase is left unchanged and an omission gets
+   the full correction. Stage-one truths are printed and stored as
+   `stage1_phrase_truth`.
+4. **Refinement masks were built by a different rule than guidance (fixed).**
+   `build_object_masks` used per-token min-max normalization and an ad hoc
+   `pow(1.5)`. It is now `build_phrase_membership_masks` and reuses
+   `phrase_membership`, so one definition drives both stages.
+5. **Claims the abstract dropped are no longer asserted.** The previous abstract
+   promised objectives for attribute intensity and spatial extent, which were never
+   implemented. The revised abstract drops both, and the README no longer claims
+   them. Hedge intensity remains the pretrained model's interpretation.
+6. **"Throughout the denoising process" remains partial (documented, not changed).**
+   Guidance applies for the first `max_iter_to_alter` steps, 30 of 50 by default.
+   This is the published Attend-and-Excite schedule and is now stated in the README
+   rather than implied to be every step.
+7. **Update magnitude is still unvalidated on GPU (open).** The absolute `0.01`
+   update-RMS ceiling was chosen when gradients were `1e-5`. Membership raised the
+   gradient scale by two to three orders of magnitude, so the ceiling may now bind
+   every step, and a fixed absolute bound ignores the latent scale, which varies
+   with the scheduler's initial sigma. Rather than retune it blind, the diagnostics
+   now record `update_ratio` (update RMS over latent RMS) and `clipped`. Read those
+   from the first `--compare` run before changing the ceiling.
+
+## Standards
+
+No hard documented-standard violations; the repository documents no standards. Four
+baseline smells, all judgement calls:
+
+1. **Primitive Obsession (fixed).** A phrase was a bare list of integer token
+   indices threaded through five call sites. The membership function is now the unit
+   that moves between guidance, diagnostics and refinement.
+2. **Duplicated Code (fixed).** Guidance and refinement each had their own
+   attention-to-mask normalization. Both now call `phrase_membership`.
+3. **Speculative Generality (fixed).** `predicate_truth`'s out-of-range guard was
+   unreachable, because `compute_fuzzy_loss` validates indices first and raises, and
+   `get_token_attention` had no callers. Both are removed; `phrase_truth_scores`
+   replaces the latter with a value that is actually recorded.
+4. **Mysterious Name (fixed).** `build_object_masks` returned token-indexed
+   attention masks, not objects. It is now `build_phrase_membership_masks`.
+
+Deliberately not changed: `refine_with_predicate`, `PredicateRefinerProcessor` and
+`attach_predicate_control` keep their names, and the snow study keeps its
+`predicate_strength` design key. The abstract's new wording is prose for the same
+mechanism, and that key is persisted in resumable Kaggle run plans, so renaming it
+would break resume for no methodological gain. Docstrings and documentation use the
+abstract's "spatially guided attention refinement" wording.
+
+Also corrected in the supplied abstract text: "inconsistant object" to "inconsistent
+objects", "composi1tions" to "compositions", the duplicated "phrase-level", and the
+stray space inside the final `FuzzyDiff` macro.
+
+## Validation
+
+Local, CPU only, with torch 2.14.1+cpu / diffusers 0.35.1 / transformers 4.56.2:
+34 of 34 tests pass, among them 12 notebook regression tests including four new ones (membership is graded rather
+than context-scaled, a phrase pools its subtokens into one predicate, phrase truths
+and masks are read back through the store shape generate() fills, and a fully
+grounded phrase is not reweighted), and all 26 notebook code cells compile
+(`python run_fullpipeline.py --check`). The snow adapter tests pass and now persist
+`text_span`; checkpoints written before this change resume with membership taken over
+the whole context.
+
+One consequence to plan around: the snow study's resume guard compares code
+fingerprints, and the membership change alters them, so `run_snow_experiment.py` now
+refuses to top up a manifest produced by the previous algorithm. That refusal is
+correct, because mixing pre- and post-membership images in one study would invalidate
+it. Start those runs in a new `--output` directory. A regression test pins both
+halves of that behaviour: the one historical metadata repair still resumes, and a
+changed generation algorithm is refused.
+
+Not validated: everything that needs a GPU. No SDXL weights were run, so no claim is
+made about image quality, T4 peak memory, or whether guidance now visibly changes the
+output. Run `python run_fullpipeline.py --compare` first and read `update_ratio`,
+`clipped` and `stage1_phrase_truth` before claiming any improvement.
+
+Spec: 7 findings, 5 fixed; worst was the ungraded truth value that made the loss
+nearly constant. Standards: 4 findings, all fixed; worst was the duplicated
+attention-to-mask normalization between the two stages.

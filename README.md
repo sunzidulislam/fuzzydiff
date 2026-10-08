@@ -6,7 +6,7 @@ FuzzyDiff introduces **fuzzy-logic-guided diffusion** to improve text-to-image g
 
 # Abstract
 
-Diffusion models have demonstrated impressive text-to-image generation capabilities, producing high-fidelity images from natural-language prompts. However, they often struggle when prompts contain **graded or uncertain semantics**, frequently yielding **missing objects, weak attributes, or inconsistent relations**. To address this limitation, we propose **FuzzyDiff**, a fuzzy-logic-guided diffusion framework that explicitly represents linguistic uncertainty and propagates it throughout the denoising process to improve prompt-faithful image synthesis. FuzzyDiff converts **phrase-level cross-attention maps into grounded fuzzy predicates**, enabling prompt statements to be evaluated as **differentiable graded truth values rather than binary constraints**. These fuzzy truth scores define guidance objectives that softly enforce **attribute intensity, object existence, spatial extent, and relational consistency**, while preserving the flexibility of diffusion sampling. In addition, we introduce a **predicate-based image-to-image refiner** that further strengthens attribute completeness by correcting residual omissions and refining weakly grounded regions. Extensive experiments on prompts containing **hedges, graded attributes, and multi-object relations** show that FuzzyDiff improves semantic faithfulness and reduces **missing-object and attribute-leakage failures**, while maintaining strong visual quality. These results demonstrate the benefit of integrating **fuzzy reasoning into diffusion-based image generation**.
+Diffusion models have demonstrated impressive text-to-image generation capabilities, producing high-fidelity images from natural-language prompts. However, they often struggle when prompts contain **graded or uncertain semantics**, frequently yielding **missing or inconsistent objects**. To address this, we propose **FuzzyDiff**, a fuzzy-logic-guided diffusion framework that explicitly represents linguistic uncertainty and propagates it throughout the denoising process to improve prompt-faithful image synthesis. FuzzyDiff converts cross-attention maps into **phrase-level spatial membership functions**, enabling prompt statements to be evaluated as **differentiable, graded truth values rather than binary constraints**. In addition, we introduce a **spatially guided attention refinement** that further strengthens attribute completeness by correcting residual omissions and refining weakly grounded regions. Extensive experiments on diverse prompts with **hedges and multi-attribute compositions** show that FuzzyDiff improves semantic faithfulness and reduces **missing-attribute failures** while maintaining strong visual quality, demonstrating the benefit of integrating **fuzzy reasoning into diffusion-based image generation**.
 
 ---
 
@@ -29,7 +29,53 @@ These examples demonstrate that **FuzzyDiff captures gradual semantic changes an
 
 # Architecture
 
-![FuzzyDiff Architecture](https://github.com/user-attachments/assets/ecbe6c83-c0de-49cb-b565-19bcdc25d666)
+![FuzzyDiff conceptual architecture: prompt-conditioned cross-attention, fuzzy guidance, spatially guided attention refinement, and image decoding](docs/assets/fuzzydiff-architecture.png)
+
+The diagram presents the intended flow from a text prompt and noisy latent to
+an image. Its example prompt is **“Smiling girl and slightly small dog standing
+together.”**
+
+1. **Extract cross-attention.** The SDXL U-Net processes the latent with text
+   conditioning. Cross-attention associates prompt tokens with spatial latent
+   locations; tracked phrases select the token maps used for guidance.
+2. **Compute fuzzy objectives.** Each tracked phrase is converted into a
+   spatial membership function with values in `[0, 1]`: the phrase's share of
+   the sharpened per-position distribution over the prompt's own tokens. A soft
+   maximum of that map is the phrase's presence truth, and membership centroids
+   give the truth of any explicitly requested 2D spatial relation. Truth values
+   are combined with the Goedel t-norm (`min`) and turned into a loss by `-log`.
+3. **Guide denoising.** Gradients of these objectives update the latent during
+   selected denoising steps. The base stage decodes and saves an initial image.
+4. **Apply spatially guided attention refinement.** The same phrase membership
+   functions, computed from the aggregated base cross-attention, become soft
+   spatial masks. The image-to-image refiner uses them to reweight conditional
+   cross-attention and renormalizes the probabilities. Each phrase's correction
+   is scaled by its membership deficit `1 - truth`, so residual omissions are
+   corrected while already grounded phrases are left unchanged.
+5. **Decode the output.** The VAE converts the refined latent into the final
+   image. The runner saves both image stages and diagnostic metadata.
+
+**Implementation scope.** This is a conceptual diagram, not a record of a
+single measured run. The maintained notebook implements phrase presence and
+the explicit relations `left_of`, `right_of`, `above`, and `below`. Guidance
+runs for the first `max_iter_to_alter` denoising steps (30 of 50 by default),
+not every step. The diagram's separate sigmoid-interval hedge membership block
+is not implemented as a calibrated objective: words such as “slightly” are
+interpreted by the pretrained model. Attribute scores such as smiling or
+relative dog size are not independently calibrated. The refiner uses a decoded base image and
+re-encodes it for image-to-image processing, although that intermediate decode
+is omitted from the diagram.
+
+**Reading the image panels.** Cyan silhouettes are illustrative mask-based
+glow effects, not measured attention. The separately generated DINO heatmaps
+in this workspace are vision-model self-attention on an uploaded photo;
+they are not SDXL U-Net cross-attention. To report attention before and after
+FuzzyDiff refinement, capture and label maps from the corresponding actual
+model forwards. These example panels do not establish a refinement gain.
+
+The implementation is in
+[`pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb`](pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb);
+[`run_fullpipeline.py`](run_fullpipeline.py) executes its code cells.
 
 ---
 
@@ -100,7 +146,7 @@ relations are `left_of`, `right_of`, `above`, `below`; no spatial constraint is
 added automatically. Model-loading cells must be rerun after the final cell unloads
 the base pipeline.
 
-The loss guides token presence and configured 2D relations. It does not calibrate
+The loss guides phrase presence and configured 2D relations. It does not calibrate
 hedges such as "slightly" or "very", or depth relations such as "behind". Better
 visual results require matched-seed comparison on GPU; CLIP scores alone do not
 establish improvement. See [the full two-axis review](REVIEW.md).
@@ -117,7 +163,13 @@ raw-gradient guidance using the original prompt `A very fast car`, seed 142,
 save to `/kaggle/working/outputs/comparison_seed_142`. Inspect all three before
 changing prompts or claiming a visual improvement. Small gradients are no longer
 normalized into fixed-size updates; updates preserve their magnitude, cap RMS at
-0.01, and retain float32 latent precision.
+0.01, and retain float32 latent precision. Because membership is bounded in
+`[0, 1]` instead of carrying the raw `1/context` attention scale, the loss now has
+real dynamic range and CPU fixtures show gradients two to three orders of magnitude
+above the previously recorded `1e-5`. Read `update_ratio` in the guidance
+diagnostics first: it reports the update RMS relative to the latent RMS, and
+`clipped` says whether the absolute `0.01` ceiling is what limited the step. That
+ceiling has not been retuned on GPU since the membership change.
 Native SDXL uses its usual latent precision; the custom runs use float32 latents.
 Compare the two custom images to isolate the effect of guidance. Native-versus-custom
 differences also include latent precision and attention implementation differences.
@@ -190,13 +242,18 @@ Parameters such as **seed**, **negative prompts**, and **tracked tokens** can be
 
 ---
 
-# Stage 2: Predicate-Based Refinement
+# Stage 2: Spatially Guided Attention Refinement
 
 ```python
-refined = refine_with_predicate(image, prompts, attn_store, token_indices)
+refined = refine_with_predicate(image, prompt, attn_store)
 ```
 
-The refinement stage improves **attribute grounding and object completeness**, particularly for prompts with **weak or uncertain semantic constraints**.
+The refinement stage reuses the stage-one phrase membership functions as soft
+spatial masks and reweights the refiner's conditional cross-attention inside each
+phrase's region. Each phrase's correction is scaled by its membership deficit
+`1 - truth`, so the stage targets **residual omissions and weakly grounded
+regions** rather than boosting every tracked phrase equally. Stage-one presence
+truths are printed and recorded as `stage1_phrase_truth` in the run metadata.
 
 # Baselines and Comparisons
 

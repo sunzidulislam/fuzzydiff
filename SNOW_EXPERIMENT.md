@@ -9,11 +9,11 @@ WaterGen's underwater physics or a claim of equal scene geometry.
 - Five ordinal prompt levels: very slight, slight, moderate, heavy, very heavy snow cover.
 - Three scenes: wide alpine mountains, close rocky mountain peaks, mountains beside a lake.
 - Seeds: 42, 84, 142, 202, 314.
-- Methods: native SDXL, current FuzzyDiff, current FuzzyDiff plus predicate refiner.
+- Methods: native SDXL, current FuzzyDiff, current FuzzyDiff plus the spatially guided attention refiner.
 - 768 x 768, 50 base steps, CFG 9.5; FuzzyDiff uses the existing raw gradient,
   learning rate 0.2, 30 alteration steps, alpha 10, spatial weight 0.5,
   no relations, and tracks `mountains` and `snow`.
-- Refiner: 30 steps, strength 0.4, CFG 9.5, predicate strength 2.5.
+- Refiner: 30 steps, strength 0.4, CFG 9.5, refinement strength 2.5 scaled by each phrase's membership deficit.
 - Use the existing notebook's checkpoints, fixed negative prompt, and CPU seeded generators.
 - Same scene/camera prompt and seed across each five-level/three-method block.
   Independent text-to-image sampling can still change geometry.
