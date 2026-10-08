@@ -1,11 +1,11 @@
 """Four-way comparison: {SD 1.5, SDXL} x {no fuzzy, FuzzyDiff}, matched prompt and seed.
 
-Conditions, in the order the ablation reads:
+Conditions (display order is not a measured ranking):
 
+  sdxl_fuzzy  the FuzzyDiff pipeline on SDXL with guidance on
+  sdxl_plain  the FuzzyDiff pipeline on SDXL with guidance switched off
   sd15_plain  stock Stable Diffusion 1.5, no FuzzyDiff at all
   sd15_fuzzy  SD 1.5 with the FuzzyDiff guidance pipeline
-  sdxl_plain  the FuzzyDiff pipeline on SDXL with guidance switched off
-  sdxl_fuzzy  the FuzzyDiff pipeline on SDXL with guidance on
 
 Base stage only; refinement is deliberately excluded so the comparison isolates fuzzy
 guidance. Each backbone runs at its own native resolution, which is standard practice
@@ -18,9 +18,9 @@ from pathlib import Path
 import torch
 from diffusers import DPMSolverMultistepScheduler
 
-LABELS = {'sd15_plain': 'SD 1.5\n(no fuzzy)', 'sd15_fuzzy': 'SD 1.5\n+ FuzzyDiff',
-          'sdxl_plain': 'Ours on SDXL\n(fuzzy off)', 'sdxl_fuzzy': 'Ours on SDXL\n+ FuzzyDiff'}
-GRID = (('sd15_plain', 'sd15_fuzzy'), ('sdxl_plain', 'sdxl_fuzzy'))
+LABELS = {'sdxl_fuzzy': 'Ours on SDXL + fuzzy', 'sdxl_plain': 'Ours on SDXL, fuzzy off',
+          'sd15_plain': 'SD 1.5 backbone only', 'sd15_fuzzy': 'SD 1.5 + our fuzzy pipeline'}
+GRID = (('sdxl_fuzzy', 'sdxl_plain'), ('sd15_plain', 'sd15_fuzzy'))
 
 
 def clip_scores(namespace, image, prompt, phrases):
@@ -48,7 +48,7 @@ def save_grid(directory, images, scores, title):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    figure, axes = plt.subplots(2, 2, figsize=(8, 8.8))
+    figure, axes = plt.subplots(2, 2, figsize=(10, 10.2))
     for row, names in enumerate(GRID):
         for column, name in enumerate(names):
             axis = axes[row][column]
@@ -60,10 +60,39 @@ def save_grid(directory, images, scores, title):
             minimum = scores[name]['clip']['min_part']
             axis.set_title(f'{LABELS[name]}\nmin-part CLIP {minimum:.4f}', fontsize=10)
     figure.suptitle(title, fontsize=11)
-    figure.tight_layout()
+    figure.text(0.5, 0.015, 'Base stage only; display order is not a quality ranking. '
+                'CLIP does not establish dust intensity.', ha='center', fontsize=9)
+    figure.tight_layout(rect=(0, 0.035, 1, 0.97))
     path = directory / 'four_way.png'
     figure.savefig(path, dpi=160)
     plt.close(figure)
+    return path
+
+
+def save_results(directory, report):
+    ranks = {name: rank for rank, name in enumerate(report['ranking_by_min_part'], 1)}
+    settings = report['settings']
+    lines = ['# Four-way comparison', '', f"Prompt: {report['prompt']}",
+             f"Seed: {report['seed']}. Stage: {report['stage']}.",
+             f"Membership: {settings.get('membership_mode', 'share')}; "
+             f"fuzzy learning rate: {settings['fuzzy_lr']}.", '',
+             'Rows follow the requested display order, not a quality ranking. '
+             'The rank column is computed from min-part CLIP (higher is better).', '',
+             '| Condition | Min-part CLIP rank | Min-part CLIP | Full-prompt CLIP |',
+             '| --- | ---: | ---: | ---: |']
+    for row in GRID:
+        for name in row:
+            scores = report['runs'][name]['clip']
+            lines.append(f"| {LABELS[name]} | {ranks[name]} | {scores['min_part']:.6f} | {scores['full']:.6f} |")
+    lines += ['', 'Fuzzy minus fuzzy-off min-part CLIP within each backbone:', '']
+    for name in ('sdxl', 'sd15'):
+        lines.append(f"- {name}: {report['within_backbone_delta'][name]:+.6f}")
+    lines += ['', 'CLIP and attention truths do not establish visible dust intensity. '
+              'Inspect the images and assess multiple seeds before claiming a method improvement.',
+              'SDXL and SD 1.5 use different native resolutions and guidance scales; '
+              'within-backbone differences isolate the guidance effect more directly.', '']
+    path = directory / 'four_way_results.md'
+    path.write_text('\n'.join(lines), encoding='utf-8')
     return path
 
 
@@ -85,6 +114,8 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
     directory.mkdir(parents=True, exist_ok=True)
     report = {'prompt': prompt, 'words_to_track': words, 'seed': seed,
               'stage': 'base only, no refinement',
+              'display_order': [name for row in GRID for name in row],
+              'display_order_note': 'Presentation order, not a measured quality ranking.',
               'settings': {'steps': steps, 'fuzzy_lr': learning_rate, 'guided_steps': updates,
                            'membership_sharpness': sharpness, 't_norm': t_norm,
                            'membership_mode': membership_mode,
@@ -182,6 +213,7 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
         'sdxl': report['runs']['sdxl_fuzzy']['clip']['min_part'] - report['runs']['sdxl_plain']['clip']['min_part']}
     grid = save_grid(directory, images, report['runs'], prompt)
     report['grid'] = str(grid)
+    report['results_summary'] = str(save_results(directory, report))
     (directory / 'four_way.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     print('Ranking by min-part CLIP:', ranking, flush=True)
     print('Fuzzy minus no-fuzzy, per backbone:', report['within_backbone_delta'], flush=True)

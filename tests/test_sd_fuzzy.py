@@ -128,6 +128,27 @@ class StableDiffusionBackboneTests(unittest.TestCase):
             self.assertTrue(grid.is_file())
             self.assertGreater(grid.stat().st_size, 0)
 
+    def test_four_way_results_keep_display_order_separate_from_measured_rank(self):
+        report = {'prompt': 'A slightly dusty red sports car parked on a road.', 'seed': 142,
+                  'stage': 'base only, no refinement',
+                  'settings': {'membership_mode': 'relative', 'fuzzy_lr': 0.2},
+                  'runs': {name: {'clip': {'full': full, 'min_part': part}}
+                           for name, full, part in [('sdxl_fuzzy', 0.30, 0.20),
+                                                   ('sdxl_plain', 0.29, 0.21),
+                                                   ('sd15_plain', 0.28, 0.19),
+                                                   ('sd15_fuzzy', 0.31, 0.22)]},
+                  'ranking_by_min_part': ['sd15_fuzzy', 'sdxl_plain', 'sdxl_fuzzy', 'sd15_plain'],
+                  'within_backbone_delta': {'sdxl': -0.01, 'sd15': 0.03}}
+        with tempfile.TemporaryDirectory() as directory:
+            path = four_way.save_results(Path(directory), report)
+            text = path.read_text(encoding='utf-8')
+        rows = [line for line in text.splitlines() if line.startswith('| ')][2:]
+        self.assertIn('Ours on SDXL + fuzzy | 3 |', rows[0])
+        self.assertIn('Ours on SDXL, fuzzy off | 2 |', rows[1])
+        self.assertIn('SD 1.5 backbone only | 4 |', rows[2])
+        self.assertIn('SD 1.5 + our fuzzy pipeline | 1 |', rows[3])
+        self.assertIn('not a quality ranking', text)
+
 
 if __name__ == '__main__':
     unittest.main()
