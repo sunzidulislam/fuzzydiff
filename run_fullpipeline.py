@@ -10,6 +10,8 @@ def main():
     parser.add_argument('--full', action='store_true', help='Use 768px / 50 steps instead of the smoke test.')
     parser.add_argument('--check', action='store_true', help='Compile every code cell without loading models.')
     parser.add_argument('--compare', action='store_true', help='Compare native SDXL, guidance-off and guidance-on; no refinement.')
+    parser.add_argument('--four-way', action='store_true',
+                        help='SD 1.5 and SDXL, each with and without fuzzy guidance; no refinement.')
     parser.add_argument('--prompt', default='A very fast car', help='Comparison prompt.')
     parser.add_argument('--words', default='fast,car', help='Comma-separated tracked phrases for --compare.')
     parser.add_argument('--seed', type=int, default=142, help='Comparison seed.')
@@ -30,11 +32,19 @@ def main():
                            if not line.lstrip().startswith(('%pip ', '!pip ')))
         compiled = compile(source, f'{path}:cell-{index}', 'exec')
         count += 1
-        if not options.check and not (options.compare and index == len(notebook['cells']) - 1):
+        last_cell = index == len(notebook['cells']) - 1
+        if not options.check and not ((options.compare or options.four_way) and last_cell):
             print(f'Running notebook cell {index}', flush=True)
             exec(compiled, namespace)
     if options.check:
         print(f'Compiled {count} code cells successfully.')
+    elif options.four_way:
+        import four_way
+        importlib.reload(four_way)
+        four_way.run_four_way(namespace, prompt=options.prompt,
+                              words=[word.strip() for word in options.words.split(',') if word.strip()],
+                              seed=options.seed,
+                              learning_rate=float(options.lr.split(',')[0]))
     elif options.compare:
         # %run reuses the kernel, so a module imported before a git pull would be
         # served from sys.modules; reload so the file on disk is what runs.
