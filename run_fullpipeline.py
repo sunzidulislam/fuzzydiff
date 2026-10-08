@@ -1,5 +1,6 @@
 """Execute the canonical notebook after installing requirements.txt."""
 import argparse
+import importlib
 import json
 from pathlib import Path
 
@@ -35,7 +36,11 @@ def main():
     if options.check:
         print(f'Compiled {count} code cells successfully.')
     elif options.compare:
-        from compare_fullpipeline import run_comparison
+        # %run reuses the kernel, so a module imported before a git pull would be
+        # served from sys.modules; reload so the file on disk is what runs.
+        import compare_fullpipeline
+        importlib.reload(compare_fullpipeline)
+        run_comparison = compare_fullpipeline.run_comparison
         run_comparison(namespace, prompt=options.prompt,
                        words=[word.strip() for word in options.words.split(',') if word.strip()],
                        seed=options.seed,
