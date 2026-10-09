@@ -81,6 +81,22 @@ class StableDiffusionBackboneTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             run_sd.resolve_bindings(groups, [('yellow', 'book')])
 
+    def test_relation_verbs_parse_resolve_and_stay_in_step_with_the_runner(self):
+        import run_fullpipeline
+        self.assertEqual(run_sd.RELATION_VERBS, run_fullpipeline.RELATION_VERBS,
+                         'The runner mirrors the verb list; update both together')
+        parsed = run_sd.parse_relations(['green apple:larger_than:red apple'])
+        self.assertEqual(parsed, [('green apple', 'larger_than', 'red apple')])
+        for bad in ('a:larger_than', 'a:much_bigger:b', 'a::b'):
+            with self.assertRaises(ValueError):
+                run_sd.parse_relations([bad])
+        groups = {'green apple': [1, 2], 'red apple': [4, 5]}
+        self.assertEqual(run_sd.resolve_relations(groups, parsed),
+                         [([1, 2], 'larger_than', [4, 5])])
+        # Bindings are the bound_to verb, not a separate code path.
+        self.assertEqual(run_sd.resolve_bindings(groups, [('green apple', 'red apple')]),
+                         [([1, 2], 'bound_to', [4, 5])])
+
     def test_guidance_changes_a_seeded_image_and_records_diagnostics(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)

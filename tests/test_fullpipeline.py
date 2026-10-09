@@ -147,6 +147,36 @@ class NotebookRegressionTests(unittest.TestCase):
         soft = self.code['phrase_truth_scores'](store, 10.0, 5.0)['phrase']
         self.assertNotAlmostEqual(sharp, soft, places=3)
 
+    def test_size_relations_compare_membership_area(self):
+        # Comparative size is gradable in image space, so the predicate reads the
+        # membership mass each phrase holds rather than any calibrated extent.
+        big = torch.ones(4, 4)
+        small = torch.zeros(4, 4)
+        small[0, 0] = 1.0
+        self.assertGreater(self.code['soft_larger'](big, small).item(), 0.9)
+        self.assertLess(self.code['soft_larger'](small, big).item(), 0.1)
+        self.assertAlmostEqual(self.code['soft_larger'](big, big.clone()).item(), 0.5, places=6)
+        # Scale free: doubling both areas leaves the truth unchanged.
+        self.assertAlmostEqual(self.code['soft_larger'](big, small).item(),
+                               self.code['soft_larger'](big * 2, small * 2).item(), places=6)
+
+    def test_larger_than_relation_prefers_the_stated_ordering(self):
+        context = 8
+        span = (1, context - 1)
+
+        def loss_for(relation):
+            # Token 1 covers three of four positions; token 2 covers one.
+            logits = torch.full((1, 4, context), -2.0)
+            logits[:, [0, 1, 2], 1] = 4.0
+            logits[:, [3], 2] = 4.0
+            return self.code['compute_fuzzy_loss']({'down_cross': logits.softmax(-1)},
+                                                   [[1], [2]], text_span=span,
+                                                   relations=[([1], relation, [2])])
+
+        self.assertLess(loss_for('larger_than').item(), loss_for('smaller_than').item())
+        with self.assertRaises(ValueError):
+            loss_for('much_larger_than')
+
     def test_summarize_guidance_flags_an_inert_run(self):
         # Three runs reached this state unnoticed: guidance executed, moved the
         # latent by well under 0.01 percent, and produced an image identical to

@@ -185,15 +185,38 @@ def build_config(fuzzy, tokenizer, prompt, words, seed, output_path, steps=50, g
     return cfg, groups
 
 
+RELATION_VERBS = ('left_of', 'right_of', 'above', 'below', 'bound_to',
+                  'larger_than', 'smaller_than')
+
+
+def parse_relations(values):
+    """Parse --relate "phrase:verb:phrase" arguments."""
+    relations = []
+    for value in values or ():
+        parts = [part.strip() for part in value.split(':')]
+        if len(parts) != 3 or not all(parts):
+            raise ValueError(f'--relate expects "phrase:verb:phrase", got {value!r}.')
+        subject, verb, obj = parts
+        if verb not in RELATION_VERBS:
+            raise ValueError(f'Unsupported relation {verb!r}; use one of {", ".join(RELATION_VERBS)}.')
+        relations.append((subject, verb, obj))
+    return relations
+
+
+def resolve_relations(groups, relations):
+    """Turn phrase-name relations into token-group relations."""
+    resolved = []
+    for subject, verb, obj in relations:
+        for phrase in (subject, obj):
+            if phrase not in groups:
+                raise ValueError(f'Relation operand {phrase!r} is not a tracked phrase; add it to --words.')
+        resolved.append((groups[subject], verb, groups[obj]))
+    return resolved
+
+
 def resolve_bindings(groups, bindings):
     """Turn ('attribute', 'object') phrase pairs into token-group relations."""
-    relations = []
-    for attribute, obj in bindings:
-        for phrase in (attribute, obj):
-            if phrase not in groups:
-                raise ValueError(f'Binding operand {phrase!r} is not a tracked phrase; add it to --words.')
-        relations.append((groups[attribute], 'bound_to', groups[obj]))
-    return relations
+    return resolve_relations(groups, [(attribute, 'bound_to', obj) for attribute, obj in bindings])
 
 
 def parse_bindings(values):
@@ -259,6 +282,10 @@ def main():
                              '--bind "yellow>clock". Both sides must be tracked phrases.')
     parser.add_argument('--binding-weight', type=float, default=1.0,
                         help='Weight of each binding conjunct in the loss.')
+    parser.add_argument('--relate', action='append', metavar='PHRASE:VERB:PHRASE',
+                        help='Add a relation between two tracked phrases, e.g. '
+                             '--relate "green apple:larger_than:red apple". Verbs: '
+                             + ', '.join(RELATION_VERBS) + '.')
     parser.add_argument('--negative', default='', help='Negative prompt.')
     parser.add_argument('--output', default=None, help='Output directory.')
     options = parser.parse_args()
@@ -288,7 +315,8 @@ def main():
                                    options.lr, options.updates, options.sharpness, options.tnorm,
                                    options.membership_mode)
         cfg.binding_loss_weight = options.binding_weight
-        relations = resolve_bindings(groups, parse_bindings(options.bind))
+        relations = resolve_relations(groups, parse_relations(options.relate)
+                                      + [(a, 'bound_to', b) for a, b in parse_bindings(options.bind)])
         print('Tracked phrase tokens:', groups, flush=True)
         if relations:
             print('Bindings:', parse_bindings(options.bind), flush=True)

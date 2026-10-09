@@ -142,8 +142,16 @@ if you want to keep them.
 To run interactively, import the main notebook into Kaggle and run top to bottom.
 Set `SMOKE_TEST = False` in its final cell for a full run. Change prompt, tracked
 phrases, seeds, negative prompt and optional relations there. Supported explicit
-relations are `left_of`, `right_of`, `above`, `below` and `bound_to`; no constraint is
-added automatically.
+relations are `left_of`, `right_of`, `above`, `below`, `bound_to`, `larger_than` and
+`smaller_than`; no constraint is added automatically. Both runners accept
+`--relate "phrase:verb:phrase"` for any of them, and `--bind "attribute>object"` as
+shorthand for `bound_to`.
+
+`larger_than` compares the membership mass each phrase holds, normalized by their
+total, so the comparison is scale free and graded. Attention mass is a proxy for
+spatial extent rather than a measurement of it: a small object attended strongly can
+carry mass comparable to a large one attended weakly, so read the predicate as a soft
+preference, not a calibrated size ratio.
 
 `bound_to` is the attribute-object binding predicate: `("yellow", "bound_to", "clock")`
 requires the attribute to be grounded where the object is. It is a fuzzy AND over the

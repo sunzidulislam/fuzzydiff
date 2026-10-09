@@ -4,6 +4,11 @@ import importlib
 import json
 from pathlib import Path
 
+# Mirror of run_sd.RELATION_VERBS, duplicated so --check stays free of the torch
+# import chain. tests/test_sd_fuzzy.py asserts the two lists stay in step.
+RELATION_VERBS = ('left_of', 'right_of', 'above', 'below', 'bound_to',
+                  'larger_than', 'smaller_than')
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -27,6 +32,9 @@ def main():
                              '--bind "yellow>clock". Both sides must be tracked phrases.')
     parser.add_argument('--binding-weight', type=float, default=1.0,
                         help='Weight of each binding conjunct in the loss.')
+    parser.add_argument('--relate', action='append', metavar='PHRASE:VERB:PHRASE',
+                        help='Add a relation between two tracked phrases, e.g. '
+                             '--relate "green apple:larger_than:red apple".')
     parser.add_argument('--lr', default='0.2',
                         help='Comma-separated guidance step sizes; --compare renders one image per value.')
     options = parser.parse_args()
@@ -46,6 +54,17 @@ def main():
             if any(phrase not in words for phrase in pair):
                 raise ValueError('Both binding operands must appear in --words.')
             bindings.append(pair)
+        relations = []
+        for value in options.relate or ():
+            parts = [part.strip() for part in value.split(':')]
+            if len(parts) != 3 or not all(parts):
+                raise ValueError('--relate expects "phrase:verb:phrase".')
+            subject, verb, obj = parts
+            if verb not in RELATION_VERBS:
+                raise ValueError(f'Unsupported relation {verb!r}; use one of {", ".join(RELATION_VERBS)}.')
+            if any(phrase not in words for phrase in (subject, obj)):
+                raise ValueError('Both relation operands must appear in --words.')
+            relations.append((subject, verb, obj))
     except ValueError as error:
         parser.error(str(error))
     path = Path(__file__).parent / 'pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb'
@@ -54,7 +73,7 @@ def main():
                  'RUN_OPTIONS': dict(prompt=options.prompt, words=words, seed=options.seed,
                                      attend_excite_lr=rates[0], membership_sharpness=options.sharpness,
                                      t_norm=options.tnorm, membership_mode=options.membership_mode,
-                                     relations=[(a, 'bound_to', b) for a, b in bindings],
+                                     relations=[(a, 'bound_to', b) for a, b in bindings] + relations,
                                      binding_loss_weight=options.binding_weight, output=options.output)}
     count = 0
     for index, cell in enumerate(notebook['cells']):
@@ -84,6 +103,7 @@ def main():
                               learning_rate=rates[0],
                               sharpness=options.sharpness, t_norm=options.tnorm,
                               bindings=bindings, binding_weight=options.binding_weight,
+                              relations=relations,
                               membership_mode=options.membership_mode, output=options.output)
     elif options.compare:
         # %run reuses the kernel, so a module imported before a git pull would be

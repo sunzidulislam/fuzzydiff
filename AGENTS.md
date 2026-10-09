@@ -38,7 +38,7 @@ embeddings; SD 1.x does not).
 | `run_fullpipeline.py` | Executes the notebook's cells; dispatches `--check` / `--full` / `--compare` / `--four-way` |
 | `compare_fullpipeline.py` | Matched-seed SDXL diagnosis: native vs guidance-off vs guidance-on at each `--lr` |
 | `four_way.py` | `{SD 1.5, SDXL} × {no fuzzy, FuzzyDiff}` ablation grid plus CLIP metrics |
-| `run_sd.py` | SD 1.x backbone, plain or fuzzy; also hosts `parse_bindings` / `resolve_bindings` |
+| `run_sd.py` | SD 1.x backbone, plain or fuzzy; also hosts `RELATION_VERBS`, `parse_relations` / `resolve_relations` and the `bound_to` shorthands |
 | `snow_*.py`, `run_snow_*.py` | Separate resumable snow-coverage study; see `SNOW_EXPERIMENT.md`, `SNOW_CONTROL.md` |
 | `REVIEW.md` | Running record of findings, including measured GPU results. **Read before changing the method.** |
 | `tests/` | CPU-only regression tests; no weight downloads |
@@ -47,7 +47,7 @@ embeddings; SD 1.x does not).
 
 ```bash
 python run_fullpipeline.py --check          # compile all 26 notebook code cells, no models
-python -m unittest discover -s tests        # 44 CPU tests, no downloads
+python -m unittest discover -s tests        # 55 CPU tests, no downloads
 ```
 
 GPU work runs on Kaggle (T4, Internet on). Models load sequentially with CPU offload; a T4
@@ -60,7 +60,8 @@ cannot hold SDXL and SD 1.5 at once.
 %run run_sd.py --prompt "..." --words "a,b" --fuzzy --sharpness 20 --lr 5
 ```
 
-Shared flags: `--prompt --words --seed --lr --sharpness --tnorm --bind --binding-weight`.
+Shared flags: `--prompt --words --seed --output --lr --sharpness --tnorm
+--membership-mode --bind --binding-weight --relate`.
 
 **Kaggle gotcha:** `%run` reuses the kernel, so a module imported before a `git pull` is
 served stale from `sys.modules`. `run_fullpipeline.py` reloads `four_way` and `run_sd`, and
@@ -74,7 +75,11 @@ served stale from `sys.modules`. `run_fullpipeline.py` reloads `four_way` and `r
 - `soft_truth` — soft maximum over space; the graded truth that the phrase is present.
 - `compute_fuzzy_loss` — combines phrase truths with a t-norm (`min` = Gödel, `product`),
   then `-log`. Relations `left_of`/`right_of`/`above`/`below` compare membership centroids;
-  `bound_to` is a fuzzy AND of two memberships, each rescaled by `relative_membership`.
+  `larger_than`/`smaller_than` compare membership *area*, normalized by the total so the
+  comparison is scale free; `bound_to` is a fuzzy AND of two memberships, each rescaled by
+  `relative_membership`. The verb list lives in `run_sd.RELATION_VERBS` and is mirrored in
+  `run_fullpipeline.RELATION_VERBS` to keep `--check` off the torch import path — a test
+  asserts the two stay in step.
 - Guidance runs for the first `max_iter_to_alter` steps, updating the latent *before* noise
   prediction at the same timestep. Updates keep their raw gradient magnitude, capped at
   `0.01` RMS — the cap never amplifies.
@@ -118,6 +123,8 @@ These are measured findings, recorded in `REVIEW.md`. Contradicting them needs n
    min-part CLIP got slightly *worse* with guidance in both backbones.
 4. **Attention presence does not control attribute intensity.** Maximising attention on an
    adjective's tokens does not make the rendered attribute stronger.
+   `larger_than` is the one comparative that is genuinely gradable in image space, but it
+   reads attention mass, not measured extent; do not report it as a size ratio.
 5. **CLIP scores across method versions are not comparable** when the scoring templates
    changed; `min_part` (weakest tracked phrase) is the metric to report, not `full`.
 
