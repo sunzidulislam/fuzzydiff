@@ -97,6 +97,15 @@ class StableDiffusionBackboneTests(unittest.TestCase):
         self.assertEqual(run_sd.resolve_bindings(groups, [('green apple', 'red apple')]),
                          [([1, 2], 'bound_to', [4, 5])])
 
+    def test_every_runner_path_shares_one_negative_prompt(self):
+        # --four-way silently ran with no negative prompt while --full and --compare
+        # used one, which made the arms incomparable and the outputs stock-photo-like.
+        import compare_fullpipeline
+        import run_fullpipeline
+        self.assertEqual(run_fullpipeline.DEFAULT_NEGATIVE, compare_fullpipeline.NEGATIVE,
+                         'The runner mirrors the comparison default; update both together')
+        self.assertIn('low quality', run_fullpipeline.DEFAULT_NEGATIVE)
+
     def test_guidance_changes_a_seeded_image_and_records_diagnostics(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
@@ -132,6 +141,24 @@ class StableDiffusionBackboneTests(unittest.TestCase):
             self.assertNotAlmostEqual(relative_store.guidance_diagnostics[0]['loss'],
                                       store.guidance_diagnostics[0]['loss'], places=5,
                                       msg='SD 1.x ignored the selected membership mode')
+
+    def test_refined_grid_keeps_the_full_method_as_its_own_condition(self):
+        # Folding refinement into sdxl_fuzzy would make it differ from sdxl_plain by
+        # two changes at once; the ablation chain plain -> fuzzy -> full must survive.
+        flat = [name for row in four_way.REFINED_GRID for name in row if name]
+        for name in ('sdxl_plain', 'sdxl_fuzzy', 'sdxl_full', 'sd15_plain', 'sd15_fuzzy'):
+            self.assertIn(name, flat)
+            self.assertIn(name, four_way.LABELS)
+        self.assertNotEqual(four_way.LABELS['sdxl_fuzzy'], four_way.LABELS['sdxl_full'])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            pipeline, _ = tiny_pipeline(path, self.fuzzy)
+            image = run_sd.generate_plain(pipeline, PROMPT, seed=42, steps=1, guidance=1.0, size=64)
+            images = {name: image for name in flat}
+            scores = {name: {'clip': {'min_part': 0.25}} for name in flat}
+            grid = four_way.save_grid(path, images, scores, PROMPT, four_way.REFINED_GRID)
+            self.assertTrue(grid.is_file())
+            self.assertGreater(grid.stat().st_size, 0)
 
     def test_four_way_grid_renders_every_condition(self):
         with tempfile.TemporaryDirectory() as directory:

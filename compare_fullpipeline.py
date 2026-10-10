@@ -11,11 +11,12 @@ NEGATIVE = ('cartoon, anime, illustration, painting, drawing, sketch, 3d render,
 
 
 def run_comparison(namespace, prompt='A very fast car', words=('fast', 'car'), seed=142,
-                   learning_rates=(0.2,), sharpness=100.0, t_norm='min', bindings=(),
+                   learning_rates=(0.2,), sharpness=100.0, t_norm='min', negative=None, bindings=(),
                    binding_weight=1.0, membership_mode='share', output=None):
     pipeline = namespace['model']
     words = list(words)
-    settings = dict(prompt=prompt, negative_prompt=NEGATIVE, height=768, width=768,
+    negative_prompt = NEGATIVE if negative is None else negative
+    settings = dict(prompt=prompt, negative_prompt=negative_prompt, height=768, width=768,
                     num_inference_steps=50, guidance_scale=9.5)
     directory = Path(output) if output else (
         (Path('/kaggle/working/outputs') if Path('/kaggle/working').exists()
@@ -75,7 +76,7 @@ def run_comparison(namespace, prompt='A very fast car', words=('fast', 'car'), s
             print('Generating', label, flush=True)
             image, _, store = namespace['generate'](
                 prompt, words, seed=seed, num_steps=50, guidance=9.5, height=768, width=768,
-                max_iter_to_alter=updates, attend_excite_lr=rate, negative_prompt=NEGATIVE,
+                max_iter_to_alter=updates, attend_excite_lr=rate, negative_prompt=negative_prompt,
                 relations=[(attribute, 'bound_to', obj) for attribute, obj in bindings],
                 membership_sharpness=sharpness, t_norm=t_norm, pipeline=pipeline,
                 binding_loss_weight=binding_weight, membership_mode=membership_mode)

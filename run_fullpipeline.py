@@ -4,6 +4,11 @@ import importlib
 import json
 from pathlib import Path
 
+# Shared by --full, --compare and --four-way so the three paths agree; mirrored in
+# compare_fullpipeline.NEGATIVE, which a test asserts stays in step.
+DEFAULT_NEGATIVE = ('cartoon, anime, illustration, painting, drawing, sketch, 3d render, cgi, '
+                    'toy-like, plastic texture, low quality, blurry, distorted, text, watermark')
+
 # Mirror of run_sd.RELATION_VERBS, duplicated so --check stays free of the torch
 # import chain. tests/test_sd_fuzzy.py asserts the two lists stay in step.
 RELATION_VERBS = ('left_of', 'right_of', 'above', 'below', 'bound_to',
@@ -32,6 +37,10 @@ def main():
                              '--bind "yellow>clock". Both sides must be tracked phrases.')
     parser.add_argument('--binding-weight', type=float, default=1.0,
                         help='Weight of each binding conjunct in the loss.')
+    parser.add_argument('--refine', action='store_true',
+                        help='--four-way only: add sdxl_full, the complete method with refinement.')
+    parser.add_argument('--negative', default=DEFAULT_NEGATIVE,
+                        help='Negative prompt; pass an empty string to disable.')
     parser.add_argument('--relate', action='append', metavar='PHRASE:VERB:PHRASE',
                         help='Add a relation between two tracked phrases, e.g. '
                              '--relate "green apple:larger_than:red apple".')
@@ -74,7 +83,8 @@ def main():
                                      attend_excite_lr=rates[0], membership_sharpness=options.sharpness,
                                      t_norm=options.tnorm, membership_mode=options.membership_mode,
                                      relations=[(a, 'bound_to', b) for a, b in bindings] + relations,
-                                     binding_loss_weight=options.binding_weight, output=options.output)}
+                                     binding_loss_weight=options.binding_weight,
+                                     negative_prompt=options.negative, output=options.output)}
     count = 0
     for index, cell in enumerate(notebook['cells']):
         if cell['cell_type'] != 'code':
@@ -103,7 +113,8 @@ def main():
                               learning_rate=rates[0],
                               sharpness=options.sharpness, t_norm=options.tnorm,
                               bindings=bindings, binding_weight=options.binding_weight,
-                              relations=relations,
+                              relations=relations, negative=options.negative,
+                              refine=options.refine,
                               membership_mode=options.membership_mode, output=options.output)
     elif options.compare:
         # %run reuses the kernel, so a module imported before a git pull would be

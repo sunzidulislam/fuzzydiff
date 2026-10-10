@@ -37,7 +37,7 @@ embeddings; SD 1.x does not).
 | `pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb` | Canonical implementation: config, membership, loss, attention collection, SDXL pipeline, refinement, entry cell |
 | `run_fullpipeline.py` | Executes the notebook's cells; dispatches `--check` / `--full` / `--compare` / `--four-way` |
 | `compare_fullpipeline.py` | Matched-seed SDXL diagnosis: native vs guidance-off vs guidance-on at each `--lr` |
-| `four_way.py` | `{SD 1.5, SDXL} × {no fuzzy, FuzzyDiff}` ablation grid plus CLIP metrics |
+| `four_way.py` | `{SD 1.5, SDXL} × {no fuzzy, FuzzyDiff}` ablation grid plus CLIP metrics; `--refine` adds `sdxl_full`, the complete two-stage method |
 | `run_sd.py` | SD 1.x backbone, plain or fuzzy; also hosts `RELATION_VERBS`, `parse_relations` / `resolve_relations` and the `bound_to` shorthands |
 | `snow_*.py`, `run_snow_*.py` | Separate resumable snow-coverage study; see `SNOW_EXPERIMENT.md`, `SNOW_CONTROL.md` |
 | `REVIEW.md` | Running record of findings, including measured GPU results. **Read before changing the method.** |
@@ -47,7 +47,7 @@ embeddings; SD 1.x does not).
 
 ```bash
 python run_fullpipeline.py --check          # compile all 26 notebook code cells, no models
-python -m unittest discover -s tests        # 56 CPU tests, no downloads
+python -m unittest discover -s tests        # 58 CPU tests, no downloads
 ```
 
 GPU work runs on Kaggle (T4, Internet on). Models load sequentially with CPU offload; a T4
@@ -61,7 +61,11 @@ cannot hold SDXL and SD 1.5 at once.
 ```
 
 Shared flags: `--prompt --words --seed --output --lr --sharpness --tnorm
---membership-mode --bind --binding-weight --relate`.
+--membership-mode --bind --binding-weight --relate --negative --refine`.
+
+`--refine` keeps refinement as its own condition (`sdxl_full`) rather than folding it into
+`sdxl_fuzzy`. Do not merge them: `sdxl_fuzzy` must differ from `sdxl_plain` by exactly one
+change, or the guidance ablation stops being readable. The chain is plain -> fuzzy -> full.
 
 **Kaggle gotcha:** `%run` reuses the kernel, so a module imported before a `git pull` is
 served stale from `sys.modules`. `run_fullpipeline.py` reloads `four_way` and `run_sd`, and

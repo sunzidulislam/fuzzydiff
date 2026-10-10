@@ -7,9 +7,17 @@ Conditions (display order is not a measured ranking):
   sd15_plain  stock Stable Diffusion 1.5, no FuzzyDiff at all
   sd15_fuzzy  SD 1.5 with the FuzzyDiff guidance pipeline
 
-Base stage only; refinement is deliberately excluded so the comparison isolates fuzzy
-guidance. Each backbone runs at its own native resolution, which is standard practice
-but means sd15_* and sdxl_* are not pixel-comparable; the two within-backbone pairs are.
+With --refine a fifth condition is added:
+
+  sdxl_full   sdxl_fuzzy plus spatially guided attention refinement: the complete method
+
+sdxl_full is kept separate from sdxl_fuzzy on purpose. Folding refinement into the
+fuzzy arm would make it differ from sdxl_plain by two changes at once, and the
+guidance ablation could no longer be read off the comparison. The chain
+plain -> fuzzy -> full attributes each stage separately.
+
+Each backbone runs at its own native resolution, which is standard practice but means
+sd15_* and sdxl_* are not pixel-comparable; the within-backbone comparisons are.
 """
 import gc
 import json
@@ -19,8 +27,10 @@ import torch
 from diffusers import DPMSolverMultistepScheduler
 
 LABELS = {'sdxl_fuzzy': 'Ours on SDXL + fuzzy', 'sdxl_plain': 'Ours on SDXL, fuzzy off',
-          'sd15_plain': 'SD 1.5 backbone only', 'sd15_fuzzy': 'SD 1.5 + our fuzzy pipeline'}
+          'sd15_plain': 'SD 1.5 backbone only', 'sd15_fuzzy': 'SD 1.5 + our fuzzy pipeline',
+          'sdxl_full': 'Ours on SDXL, full\n(fuzzy + refinement)'}
 GRID = (('sdxl_fuzzy', 'sdxl_plain'), ('sd15_plain', 'sd15_fuzzy'))
+REFINED_GRID = (('sdxl_full', 'sdxl_fuzzy', 'sdxl_plain'), ('sd15_plain', 'sd15_fuzzy', None))
 
 
 def clip_scores(namespace, image, prompt, phrases):
@@ -44,23 +54,29 @@ def clip_scores(namespace, image, prompt, phrases):
             'min_part': min(parts.values()) if parts else None}
 
 
-def save_grid(directory, images, scores, title):
+def save_grid(directory, images, scores, title, grid=None):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    figure, axes = plt.subplots(2, 2, figsize=(10, 10.2))
-    for row, names in enumerate(GRID):
-        for column, name in enumerate(names):
+    grid = grid or GRID
+    columns = max(len(row) for row in grid)
+    figure, axes = plt.subplots(len(grid), columns, figsize=(5 * columns, 10.2),
+                                squeeze=False)
+    for row, names in enumerate(grid):
+        for column in range(columns):
             axis = axes[row][column]
             axis.axis('off')
+            name = names[column] if column < len(names) else None
+            if name is None:
+                continue
             if name not in images:
                 axis.set_title(f'{LABELS[name]}\n(not run)', fontsize=10)
                 continue
             axis.imshow(images[name])
             axis.set_title(LABELS[name], fontsize=10)
     figure.suptitle(title, fontsize=11)
-    figure.text(0.5, 0.015, 'Base stage only; display order is not a quality ranking. '
-                'CLIP does not establish dust intensity.', ha='center', fontsize=9)
+    figure.text(0.5, 0.015, 'Display order is not a quality ranking; CLIP does not '
+                'establish attribute intensity.', ha='center', fontsize=9)
     figure.tight_layout(rect=(0, 0.035, 1, 0.97))
     path = directory / 'four_way.png'
     figure.savefig(path, dpi=160)
@@ -105,7 +121,7 @@ def unload(pipeline):
 def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2, updates=30,
                  sd_model='stable-diffusion-v1-5/stable-diffusion-v1-5', negative='',
                  sdxl_guidance=9.5, sd_guidance=7.5, sharpness=100.0, t_norm='min',
-                 bindings=(), binding_weight=1.0, relations=(), output=None,
+                 bindings=(), binding_weight=1.0, relations=(), refine=False, output=None,
                  membership_mode='share'):
     words = list(words)
     directory = Path(output) if output else (
@@ -113,7 +129,7 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
          else Path('./outputs')) / f'four_way_seed_{seed}')
     directory.mkdir(parents=True, exist_ok=True)
     report = {'prompt': prompt, 'words_to_track': words, 'seed': seed,
-              'stage': 'base only, no refinement',
+              'stage': 'base plus refinement for sdxl_full' if refine else 'base only, no refinement',
               'display_order': [name for row in GRID for name in row],
               'display_order_note': 'Presentation order, not a measured quality ranking.',
               'settings': {'steps': steps, 'fuzzy_lr': learning_rate, 'guided_steps': updates,
@@ -149,6 +165,7 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
     # --- SDXL arms, using the pipeline the notebook already loaded ---
     pipeline = namespace['model']
     original_processors = dict(pipeline.unet.attn_processors)
+    guided_image = guided_store = None
     try:
         for name, guided in (('sdxl_plain', 0), ('sdxl_fuzzy', updates)):
             pipeline.scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
@@ -164,6 +181,8 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
             # Report truths at the sharpness guidance actually used, not the default.
             record(name, image, store,
                    namespace['phrase_truth_scores'](store, 10.0, sharpness))
+            if name == 'sdxl_fuzzy':
+                guided_image, guided_store = image, store
     finally:
         pipeline.unet.set_attn_processor(original_processors)
         unload(pipeline)
@@ -173,6 +192,26 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
     del pipeline
     gc.collect()
     torch.cuda.empty_cache()
+
+    # --- Complete method: refinement runs on the guided image, after the base
+    # weights are gone. It needs only the decoded image and the CPU-side maps. ---
+    if refine and guided_image is not None:
+        refiner = None
+        try:
+            print('Generating sdxl_full (refinement)', flush=True)
+            refiner = namespace['load_refiner'](torch.device('cuda:0' if torch.cuda.is_available()
+                                                             else 'cpu'))
+            refined = namespace['refine_with_predicate'](
+                guided_image, prompt, guided_store, seed=seed, negative_prompt=negative,
+                refiner=refiner, alpha=10.0, membership_sharpness=sharpness)
+            record('sdxl_full', refined,
+                   truths=namespace['phrase_truth_scores'](guided_store, 10.0, sharpness))
+        finally:
+            if refiner is not None:
+                unload(refiner)
+                del refiner
+            gc.collect()
+            torch.cuda.empty_cache()
 
     # --- SD 1.5 arms ---
     # Reload as well as import: a long-lived kernel would otherwise serve the copy
@@ -218,7 +257,8 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
     report['within_backbone_delta'] = {
         'sd15': report['runs']['sd15_fuzzy']['clip']['min_part'] - report['runs']['sd15_plain']['clip']['min_part'],
         'sdxl': report['runs']['sdxl_fuzzy']['clip']['min_part'] - report['runs']['sdxl_plain']['clip']['min_part']}
-    grid = save_grid(directory, images, report['runs'], prompt)
+    grid = save_grid(directory, images, report['runs'], prompt,
+                     REFINED_GRID if refine else GRID)
     report['grid'] = str(grid)
     report['results_summary'] = str(save_results(directory, report))
     (directory / 'four_way.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
