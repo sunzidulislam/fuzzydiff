@@ -147,6 +147,51 @@ class NotebookRegressionTests(unittest.TestCase):
         soft = self.code['phrase_truth_scores'](store, 10.0, 5.0)['phrase']
         self.assertNotAlmostEqual(sharp, soft, places=3)
 
+    def test_hedged_comparatives_target_a_gap_instead_of_maximising_it(self):
+        # "slightly larger" is false both when the objects match and when one dwarfs
+        # the other, so the truth is a band. That is what makes hedges distinct
+        # objectives rather than the same monotone push.
+        def gap_maps(gap):
+            big = torch.zeros(8, 8)
+            small = torch.zeros(8, 8)
+            big[0:4, 0:4] = 1.0
+            small[5:8, 5:8] = 1.0 - gap
+            return big, small
+
+        slight = self.code['HEDGE_TARGETS']['slightly']
+        much = self.code['HEDGE_TARGETS']['much']
+        self.assertLess(slight, much)
+        a, b = gap_maps(0.0)
+        # Truth peaks at the target gap and falls away on both sides.
+        at_target = self.code['soft_hedged_larger'](a, b, self.code['extent_gap'](a, b).item())
+        far_above = self.code['soft_hedged_larger'](a, b, self.code['extent_gap'](a, b).item() + 0.6)
+        far_below = self.code['soft_hedged_larger'](a, b, self.code['extent_gap'](a, b).item() - 0.6)
+        self.assertGreater(at_target.item(), 0.99)
+        self.assertLess(far_above.item(), at_target.item())
+        self.assertLess(far_below.item(), at_target.item())
+        # The unhedged comparative stays monotone, unlike the hedged one.
+        self.assertGreater(self.code['soft_larger'](a, b).item(), 0.5)
+
+    def test_hedged_relation_verbs_dispatch_and_reject_unknown_hedges(self):
+        context = 8
+        span = (1, context - 1)
+        logits = torch.full((1, 4, context), -2.0)
+        logits[:, [0, 1, 2], 1] = 4.0
+        logits[:, [3], 2] = 4.0
+        maps = {'down_cross': logits.softmax(-1)}
+
+        def loss_for(verb):
+            return self.code['compute_fuzzy_loss'](maps, [[1], [2]], text_span=span,
+                                                   relations=[([1], verb, [2])])
+
+        # A big measured gap matches "much" better than "slightly".
+        self.assertLess(loss_for('much_larger_than').item(),
+                        loss_for('slightly_larger_than').item())
+        for verb in ('slightly_larger_than', 'much_smaller_than'):
+            self.assertIn(verb, self.code['RELATION_VERBS'])
+        with self.assertRaises(ValueError):
+            loss_for('enormously_larger_than')
+
     def test_size_comparison_is_not_satisfied_by_duplication(self):
         # A measured run produced two green apples instead of one larger one: total
         # mass cannot tell those apart, so extent has to. Here the duplicated layout
@@ -190,7 +235,7 @@ class NotebookRegressionTests(unittest.TestCase):
 
         self.assertLess(loss_for('larger_than').item(), loss_for('smaller_than').item())
         with self.assertRaises(ValueError):
-            loss_for('much_larger_than')
+            loss_for('bigger_than')
 
     def test_summarize_guidance_flags_an_inert_run(self):
         # Three runs reached this state unnoticed: guidance executed, moved the

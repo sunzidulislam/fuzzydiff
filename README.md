@@ -142,8 +142,10 @@ if you want to keep them.
 To run interactively, import the main notebook into Kaggle and run top to bottom.
 Set `SMOKE_TEST = False` in its final cell for a full run. Change prompt, tracked
 phrases, seeds, negative prompt and optional relations there. Supported explicit
-relations are `left_of`, `right_of`, `above`, `below`, `bound_to`, `larger_than` and
-`smaller_than`; no constraint is added automatically. Both runners accept
+relations are `left_of`, `right_of`, `above`, `below`, `bound_to`, `larger_than`,
+`smaller_than`, and hedged comparatives `<hedge>_larger_than` / `<hedge>_smaller_than`
+for the hedges `slightly`, `somewhat`, `relatively`, `moderately`, `considerably` and
+`much`; no constraint is added automatically. Both runners accept
 `--relate "phrase:verb:phrase"` for any of them, and `--bind "attribute>object"` as
 shorthand for `bound_to`.
 
@@ -154,6 +156,14 @@ total mass exactly as much as one larger instance does, so comparing sums reward
 duplication, which was observed in practice. Attention extent is still a proxy for size
 rather than a measurement of it, so read the predicate as a soft preference, not a
 calibrated size ratio.
+
+A hedge names a degree, so a hedged comparative targets a band rather than maximising
+the gap: `slightly_larger_than` is false both when the objects match and when one
+dwarfs the other, while plain `larger_than` is satisfied more the larger the gap grows.
+Each hedge maps to a target normalized extent gap (`slightly` 0.15 through `much` 0.70)
+and scores a Gaussian around it, so different hedges are different objectives rather
+than the same monotone push. Those targets are chosen, not calibrated against human
+judgements of "slightly".
 
 `bound_to` is the attribute-object binding predicate: `("yellow", "bound_to", "clock")`
 requires the attribute to be grounded where the object is. It is a fuzzy AND over the

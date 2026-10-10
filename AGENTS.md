@@ -47,7 +47,7 @@ embeddings; SD 1.x does not).
 
 ```bash
 python run_fullpipeline.py --check          # compile all 26 notebook code cells, no models
-python -m unittest discover -s tests        # 58 CPU tests, no downloads
+python -m unittest discover -s tests        # 60 CPU tests, no downloads
 ```
 
 GPU work runs on Kaggle (T4, Internet on). Models load sequentially with CPU offload; a T4
@@ -79,6 +79,7 @@ served stale from `sys.modules`. `run_fullpipeline.py` reloads `four_way` and `r
 - `soft_truth` — soft maximum over space; the graded truth that the phrase is present.
 - `compute_fuzzy_loss` — combines phrase truths with a t-norm (`min` = Gödel, `product`),
   then `-log`. Relations `left_of`/`right_of`/`above`/`below` compare membership centroids;
+  `<hedge>_larger_than` scores a Gaussian around the hedge's target gap;
   `larger_than`/`smaller_than` compare `soft_extent` — peak local membership density pooled
   over several window sizes — normalized by the total so the comparison is scale free. Do
   not revert this to a mass sum: a duplicate instance raises the sum as much as a larger
@@ -122,8 +123,12 @@ These are measured findings, recorded in `REVIEW.md`. Contradicting them needs n
    while a road was plainly visible; `slightly dusty` scored 0.99 while the car rendered clean
    and glossy. Low membership ≠ absent; high membership ≠ rendered. It is also the quantity
    guidance directly optimises, so it cannot be independent evidence that guidance works.
-2. **Hedge intensity is not implemented.** "slightly" / "very" are the pretrained model's
-   interpretation. There is no calibrated intensity predictor and no Zadeh hedge operator.
+2. **Hedge intensity is implemented only for comparatives.** `<hedge>_larger_than`
+   targets a band on the extent gap, so `slightly` and `much` are distinct objectives.
+   The targets (0.15 to 0.70) are chosen, not calibrated against human judgements, so do
+   not call them calibrated. For appearance attributes ("slightly dusty", "moderately
+   weathered") there is still no hedge operator at all: those remain the pretrained
+   model's interpretation.
 3. **No measured image-quality improvement exists.** On `"A slightly dusty red sports car
    parked on a road."`, seed 42, three configurations were tried and no arm separated;
    min-part CLIP got slightly *worse* with guidance in both backbones.

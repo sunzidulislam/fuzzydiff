@@ -85,6 +85,8 @@ class StableDiffusionBackboneTests(unittest.TestCase):
         import run_fullpipeline
         self.assertEqual(run_sd.RELATION_VERBS, run_fullpipeline.RELATION_VERBS,
                          'The runner mirrors the verb list; update both together')
+        self.assertEqual(set(run_sd.RELATION_VERBS), set(self.fuzzy['RELATION_VERBS']),
+                         'Both mirrors must match the notebook, which is canonical')
         parsed = run_sd.parse_relations(['green apple:larger_than:red apple'])
         self.assertEqual(parsed, [('green apple', 'larger_than', 'red apple')])
         for bad in ('a:larger_than', 'a:much_bigger:b', 'a::b'):

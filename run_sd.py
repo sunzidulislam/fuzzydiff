@@ -185,8 +185,13 @@ def build_config(fuzzy, tokenizer, prompt, words, seed, output_path, steps=50, g
     return cfg, groups
 
 
-RELATION_VERBS = ('left_of', 'right_of', 'above', 'below', 'bound_to',
-                  'larger_than', 'smaller_than')
+# Mirror of the notebook's RELATION_VERBS, needed before the notebook is loaded.
+# tests/test_sd_fuzzy.py asserts this stays in step with the canonical list.
+HEDGES = ('slightly', 'somewhat', 'relatively', 'moderately', 'considerably', 'much')
+RELATION_VERBS = (('left_of', 'right_of', 'above', 'below', 'bound_to',
+                   'larger_than', 'smaller_than')
+                  + tuple(f'{hedge}_{direction}_than'
+                          for hedge in HEDGES for direction in ('larger', 'smaller')))
 
 
 def parse_relations(values):

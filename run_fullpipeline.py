@@ -11,8 +11,11 @@ DEFAULT_NEGATIVE = ('cartoon, anime, illustration, painting, drawing, sketch, 3d
 
 # Mirror of run_sd.RELATION_VERBS, duplicated so --check stays free of the torch
 # import chain. tests/test_sd_fuzzy.py asserts the two lists stay in step.
-RELATION_VERBS = ('left_of', 'right_of', 'above', 'below', 'bound_to',
-                  'larger_than', 'smaller_than')
+HEDGES = ('slightly', 'somewhat', 'relatively', 'moderately', 'considerably', 'much')
+RELATION_VERBS = (('left_of', 'right_of', 'above', 'below', 'bound_to',
+                   'larger_than', 'smaller_than')
+                  + tuple(f'{hedge}_{direction}_than'
+                          for hedge in HEDGES for direction in ('larger', 'smaller')))
 
 
 def main():
