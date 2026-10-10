@@ -47,7 +47,7 @@ embeddings; SD 1.x does not).
 
 ```bash
 python run_fullpipeline.py --check          # compile all 26 notebook code cells, no models
-python -m unittest discover -s tests        # 55 CPU tests, no downloads
+python -m unittest discover -s tests        # 56 CPU tests, no downloads
 ```
 
 GPU work runs on Kaggle (T4, Internet on). Models load sequentially with CPU offload; a T4
@@ -75,8 +75,10 @@ served stale from `sys.modules`. `run_fullpipeline.py` reloads `four_way` and `r
 - `soft_truth` — soft maximum over space; the graded truth that the phrase is present.
 - `compute_fuzzy_loss` — combines phrase truths with a t-norm (`min` = Gödel, `product`),
   then `-log`. Relations `left_of`/`right_of`/`above`/`below` compare membership centroids;
-  `larger_than`/`smaller_than` compare membership *area*, normalized by the total so the
-  comparison is scale free; `bound_to` is a fuzzy AND of two memberships, each rescaled by
+  `larger_than`/`smaller_than` compare `soft_extent` — peak local membership density pooled
+  over several window sizes — normalized by the total so the comparison is scale free. Do
+  not revert this to a mass sum: a duplicate instance raises the sum as much as a larger
+  one, and a measured run produced two green apples instead of one bigger one; `bound_to` is a fuzzy AND of two memberships, each rescaled by
   `relative_membership`. The verb list lives in `run_sd.RELATION_VERBS` and is mirrored in
   `run_fullpipeline.RELATION_VERBS` to keep `--check` off the torch import path — a test
   asserts the two stay in step.
@@ -124,7 +126,10 @@ These are measured findings, recorded in `REVIEW.md`. Contradicting them needs n
 4. **Attention presence does not control attribute intensity.** Maximising attention on an
    adjective's tokens does not make the rendered attribute stronger.
    `larger_than` is the one comparative that is genuinely gradable in image space, but it
-   reads attention mass, not measured extent; do not report it as a size ratio.
+   reads attention density, not measured extent; do not report it as a size ratio.
+   Note also that neither the presence term nor the size predicate constrains object
+   *count*: `soft_truth` is a soft maximum, so a phrase present twice scores no worse
+   than a phrase present once.
 5. **CLIP scores across method versions are not comparable** when the scoring templates
    changed; `min_part` (weakest tracked phrase) is the metric to report, not `full`.
 

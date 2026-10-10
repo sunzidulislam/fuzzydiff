@@ -147,11 +147,13 @@ relations are `left_of`, `right_of`, `above`, `below`, `bound_to`, `larger_than`
 `--relate "phrase:verb:phrase"` for any of them, and `--bind "attribute>object"` as
 shorthand for `bound_to`.
 
-`larger_than` compares the membership mass each phrase holds, normalized by their
-total, so the comparison is scale free and graded. Attention mass is a proxy for
-spatial extent rather than a measurement of it: a small object attended strongly can
-carry mass comparable to a large one attended weakly, so read the predicate as a soft
-preference, not a calibrated size ratio.
+`larger_than` compares each phrase's dominant-region extent, normalized by the total,
+so the comparison is scale free and graded. Extent is peak local membership density
+pooled over several window sizes, not total mass: a second instance of an object raises
+total mass exactly as much as one larger instance does, so comparing sums rewards
+duplication, which was observed in practice. Attention extent is still a proxy for size
+rather than a measurement of it, so read the predicate as a soft preference, not a
+calibrated size ratio.
 
 `bound_to` is the attribute-object binding predicate: `("yellow", "bound_to", "clock")`
 requires the attribute to be grounded where the object is. It is a fuzzy AND over the

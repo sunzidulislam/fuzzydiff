@@ -147,6 +147,21 @@ class NotebookRegressionTests(unittest.TestCase):
         soft = self.code['phrase_truth_scores'](store, 10.0, 5.0)['phrase']
         self.assertNotAlmostEqual(sharp, soft, places=3)
 
+    def test_size_comparison_is_not_satisfied_by_duplication(self):
+        # A measured run produced two green apples instead of one larger one: total
+        # mass cannot tell those apart, so extent has to. Here the duplicated layout
+        # carries MORE mass and must still read as smaller.
+        one_large = torch.zeros(8, 8)
+        one_large[0:4, 0:4] = 1.0
+        two_small = torch.zeros(8, 8)
+        two_small[0:3, 0:3] = 1.0
+        two_small[5:8, 5:8] = 1.0
+        self.assertGreater(two_small.sum().item(), one_large.sum().item())
+        self.assertGreater(self.code['soft_extent'](one_large).item(),
+                           self.code['soft_extent'](two_small).item(),
+                           'Duplicated instances still counted as a larger object')
+        self.assertGreater(self.code['soft_larger'](one_large, two_small).item(), 0.5)
+
     def test_size_relations_compare_membership_area(self):
         # Comparative size is gradable in image space, so the predicate reads the
         # membership mass each phrase holds rather than any calibrated extent.
