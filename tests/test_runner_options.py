@@ -32,6 +32,7 @@ class RunnerOptionsTests(unittest.TestCase):
             # Execute the real configuration and entry cells, stopping at the GPU
             # boundary. The import/model-loading cells would download weights.
             if code.co_filename.endswith(':cell-4'):
+                captured['entry_options'] = dict(namespace.get('RUN_OPTIONS', {}))
                 namespace.update(dataclass=dataclass, field=field, Path=Path,
                                  List=List, Optional=Optional)
                 builtins.exec(code, namespace)
@@ -44,6 +45,7 @@ class RunnerOptionsTests(unittest.TestCase):
                 '--words', 'slightly dusty,red sports car,road', '--seed', '42',
                 '--sharpness', '20', '--tnorm', 'product', '--lr', '5',
                 '--membership-mode', 'relative',
+                '--predicate-strength', '0.5',
                 '--bind', 'slightly dusty>red sports car', '--binding-weight', '2']
         with patch.object(sys, 'argv', args), \
                 patch.object(run_fullpipeline, 'exec', execute_without_models, create=True), \
@@ -61,6 +63,7 @@ class RunnerOptionsTests(unittest.TestCase):
         self.assertEqual(captured['t_norm'], 'product')
         self.assertEqual(captured['relations'], [('slightly dusty', 'bound_to', 'red sports car')])
         self.assertEqual(captured['binding_loss_weight'], 2)
+        self.assertEqual(captured['entry_options'].get('predicate_strength'), 0.5)
 
     def test_comparison_receives_bindings_instead_of_silently_dropping_them(self):
         captured = {}
@@ -76,6 +79,26 @@ class RunnerOptionsTests(unittest.TestCase):
             run_fullpipeline.main()
         self.assertEqual(captured.get('bindings'), [('dusty', 'car')])
         self.assertEqual(captured.get('binding_weight'), 2)
+
+    def test_comparison_receives_requested_negative_prompt_and_size_relation(self):
+        for negative in ('cartoon, flat illustration', ''):
+            with self.subTest(negative=negative):
+                captured = {}
+                comparison = types.ModuleType('compare_fullpipeline')
+                comparison.run_comparison = lambda namespace, **kwargs: captured.update(kwargs)
+                args = ['run_fullpipeline.py', '--compare', '--prompt',
+                        'A slightly larger red ball beside a blue ball.',
+                        '--words', 'red ball,blue ball', '--negative', negative,
+                        '--relate', 'red ball:slightly_larger_than:blue ball']
+                with patch.object(sys, 'argv', args), \
+                        patch.object(run_fullpipeline, 'exec', lambda *args: None, create=True), \
+                        patch.dict(sys.modules, {'compare_fullpipeline': comparison}), \
+                        patch.object(run_fullpipeline.importlib, 'reload', lambda module: module), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    run_fullpipeline.main()
+                self.assertEqual(captured.get('negative'), negative)
+                self.assertEqual(captured.get('relations'),
+                                 [('red ball', 'slightly_larger_than', 'blue ball')])
 
 
 if __name__ == '__main__':

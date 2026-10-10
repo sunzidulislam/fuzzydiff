@@ -346,3 +346,77 @@ Reporting-change validation: all 51 CPU tests passed. The new regression keeps
 SDXL+fuzzy first in display order even when its measured min-part CLIP rank is
 third, preserving the actual ranking. The grid layout was visually checked using
 explicitly labeled synthetic layout fixtures, not experiment images.
+
+
+## 2026-10-11: seed-84 ball failure precedes refinement
+
+Inspected user-supplied `seed_84_stage1.png`, `seed_84_stage2_refined (2).png`,
+and `seed_84_metadata.json` from Downloads. The prompt was
+"A slightly larger red ball beside a blue ball." Stage one already contains
+an unrelated room/window/cyclist scene and one blue round object, with no
+identifiable red ball. Stage two preserves that scene. Refinement therefore did
+not originate this failure; the backbone versus fuzzy-guidance cause remains
+unresolved without matched guidance-off evidence.
+
+Recorded configuration: seed 84, 768px, 50 steps, CFG 9.5, lr=5, 30 guidance
+updates, share membership at sharpness 20, product t-norm, and the explicit
+`red ball:slightly_larger_than:blue ball` relation. All 30 updates are nonzero;
+none clipped. Update/latent RMS ratios range from 0.0003021 to 0.0071544.
+Full-prompt CLIP falls from 0.2829501 at stage one to 0.2794891 at stage two;
+this alone does not diagnose the visual failure. The negative prompt includes
+"product photography"; its contribution requires a separate controlled test.
+
+While preparing the diagnostic comparison, found that run_fullpipeline.py's
+--compare dispatch omitted --negative and --relate. The comparison helper also
+supported only bindings, so size relations could not reach its generate call.
+The runner now forwards both options, the helper combines explicit relations
+with bindings, and comparison.json records the effective relations. A failing
+CLI regression reproduced the omission for custom and empty negative prompts
+and now passes. This forwarding bug affected comparisons, not the original
+--full run; repairing it is not evidence of repaired ball generation.
+
+Next GPU probe: retain the original prompt, seed, negative prompt, membership,
+size relation, resolution, steps, and CFG; compare native SDXL, custom guidance
+off, and guided sampling at lr=0.2 and lr=5, with refinement excluded. If the
+unguided result fails, test the negative prompt separately before changing the
+fuzzy objective. No new GPU image was generated locally for this diagnosis.
+
+## 2026-10-11: whole-model benchmark runner, no new GPU results
+
+Added a separate prompt-based runner for the four archived analysis notebooks
+and the canonical full FuzzyDiff pipeline. The analysis notebooks are not
+edited or executed as batch scripts. Definitions are loaded read-only; adapters
+apply explicit common image dimensions, steps, CFG and model CPU offload.
+Full FuzzyDiff and SDXL base/refiner each occupy one whole-model report row.
+
+The archived stable notebook uses SD 1.4; the aesthetic notebook is SDXL base
+plus refiner, with no separate aesthetic guidance objective. The archived
+Attend-and-Excite attention store detaches its maps, disconnecting the
+refinement gradient. Its negative prompt is ignored; the predicate wrapper
+also drops its negative prompt, and the SDXL baseline refiner receives none.
+These algorithms are not silently repaired or claimed to reproduce published
+baselines. Reports retain these limitations; default negative conditioning is
+empty. Predicate targets use explicitly tracked phrase-final tokens and any
+provided correspondence bindings, not the archived hard-coded example indices.
+
+Cached loading is measured in fresh offline workers after optional separate
+cache preparation. Ordinary whole-model inference is measured separately from
+instrumented preprocessing, tokenization, text encoding and combined generation.
+The profiler uses exclusive nested accounting; its component sum is not mixed
+with ordinary inference time. Reports include failures, peak allocated/reserved
+GPU memory, source hashes and environment metadata. No CLIP score or ranking is
+added to images or comparison tables.
+
+Initial verification: all 71 CPU regression tests passed, including ten new
+benchmark tests. These cover read-only definition loading for all five notebooks,
+nested timing, restoring instrumentation, seeded pixel equality through a real
+random-weight CPU diffusion pipeline, and a GPU-disabled worker producing an
+error report without invented measurements. No pretrained weights were downloaded
+and no Kaggle/GPU timing or visual improvement was measured locally.
+
+Review follow-up: unsupported archived attention-map resolutions are rejected
+before model loading. Non-finite diagnostics become explicit sample errors
+without erasing previous runs. The final full CPU suite passed all 72 tests;
+the additional regression reproduces the non-finite record failure. Offload
+resets can empty the device cache before each sample, now stated in the
+benchmark documentation. Kaggle execution remains unverified.

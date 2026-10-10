@@ -90,6 +90,7 @@ def main():
                                      t_norm=options.tnorm, membership_mode=options.membership_mode,
                                      relations=[(a, 'bound_to', b) for a, b in bindings] + relations,
                                      binding_loss_weight=options.binding_weight,
+                                     predicate_strength=options.predicate_strength,
                                      negative_prompt=options.negative, output=options.output)}
     count = 0
     for index, cell in enumerate(notebook['cells']):
@@ -134,6 +135,7 @@ def main():
                        seed=options.seed,
                        learning_rates=rates, sharpness=options.sharpness, t_norm=options.tnorm,
                        bindings=bindings, binding_weight=options.binding_weight,
+                       relations=relations, negative=options.negative,
                        membership_mode=options.membership_mode, output=options.output)
 
 
