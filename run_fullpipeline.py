@@ -39,6 +39,9 @@ def main():
                         help='Weight of each binding conjunct in the loss.')
     parser.add_argument('--refine', action='store_true',
                         help='--four-way only: add sdxl_full, the complete method with refinement.')
+    parser.add_argument('--predicate-strength', type=float, default=2.5,
+                        help='Refinement attention boost. 2.5 at full deficit is aggressive; '
+                             'lower it if --refine degrades the image.')
     parser.add_argument('--negative', default=DEFAULT_NEGATIVE,
                         help='Negative prompt; pass an empty string to disable.')
     parser.add_argument('--relate', action='append', metavar='PHRASE:VERB:PHRASE',
@@ -115,6 +118,7 @@ def main():
                               bindings=bindings, binding_weight=options.binding_weight,
                               relations=relations, negative=options.negative,
                               refine=options.refine,
+                              predicate_strength=options.predicate_strength,
                               membership_mode=options.membership_mode, output=options.output)
     elif options.compare:
         # %run reuses the kernel, so a module imported before a git pull would be

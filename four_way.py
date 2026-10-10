@@ -121,8 +121,8 @@ def unload(pipeline):
 def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2, updates=30,
                  sd_model='stable-diffusion-v1-5/stable-diffusion-v1-5', negative='',
                  sdxl_guidance=9.5, sd_guidance=7.5, sharpness=100.0, t_norm='min',
-                 bindings=(), binding_weight=1.0, relations=(), refine=False, output=None,
-                 membership_mode='share'):
+                 bindings=(), binding_weight=1.0, relations=(), refine=False,
+                 predicate_strength=2.5, output=None, membership_mode='share'):
     words = list(words)
     directory = Path(output) if output else (
         (Path('/kaggle/working/outputs') if Path('/kaggle/working').exists()
@@ -135,6 +135,7 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
               'settings': {'steps': steps, 'fuzzy_lr': learning_rate, 'guided_steps': updates,
                            'membership_sharpness': sharpness, 't_norm': t_norm,
                            'membership_mode': membership_mode,
+                           'predicate_strength': predicate_strength,
                            'bindings': [list(pair) for pair in bindings],
                            'relations': [list(item) for item in relations],
                            'binding_weight': binding_weight,
@@ -201,11 +202,17 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
             print('Generating sdxl_full (refinement)', flush=True)
             refiner = namespace['load_refiner'](torch.device('cuda:0' if torch.cuda.is_available()
                                                              else 'cpu'))
+            truths = namespace['phrase_truth_scores'](guided_store, 10.0, sharpness)
             refined = namespace['refine_with_predicate'](
                 guided_image, prompt, guided_store, seed=seed, negative_prompt=negative,
-                refiner=refiner, alpha=10.0, membership_sharpness=sharpness)
-            record('sdxl_full', refined,
-                   truths=namespace['phrase_truth_scores'](guided_store, 10.0, sharpness))
+                refiner=refiner, alpha=10.0, membership_sharpness=sharpness,
+                predicate_strength=predicate_strength)
+            record('sdxl_full', refined, truths=truths)
+            # The correction each phrase received: a deficit near 1 means the full
+            # attention boost applied, which is what degrades an image.
+            report['runs']['sdxl_full']['refinement_deficits'] = {
+                phrase: 1.0 - value for phrase, value in truths.items()}
+            report['runs']['sdxl_full']['predicate_strength'] = predicate_strength
         finally:
             if refiner is not None:
                 unload(refiner)
