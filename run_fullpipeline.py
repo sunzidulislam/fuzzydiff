@@ -33,6 +33,8 @@ def main():
                         help='Experimental relative mode normalizes each phrase by its own spatial peak.')
     parser.add_argument('--sharpness', type=float, default=100.0,
                         help='Membership sharpness; lower keeps truths graded instead of near-binary.')
+    parser.add_argument('--hedge-guidance', action='store_true',
+                        help='Experimental bound-attribute attention targets; requires share membership.')
     parser.add_argument('--tnorm', choices=('min', 'product'), default='min',
                         help="Fuzzy conjunction: 'min' gradients only the weakest phrase, 'product' all of them.")
     parser.add_argument('--bind', action='append', metavar='ATTR>OBJECT',
@@ -53,6 +55,8 @@ def main():
     parser.add_argument('--lr', default='0.2',
                         help='Comma-separated guidance step sizes; --compare renders one image per value.')
     options = parser.parse_args()
+    if options.hedge_guidance and options.membership_mode != 'share':
+        parser.error('--hedge-guidance requires --membership-mode share.')
     words = [word.strip() for word in options.words.split(',') if word.strip()]
     try:
         rates = [float(rate) for rate in options.lr.split(',') if rate.strip()]
@@ -88,6 +92,7 @@ def main():
                  'RUN_OPTIONS': dict(prompt=options.prompt, words=words, seed=options.seed,
                                      attend_excite_lr=rates[0], membership_sharpness=options.sharpness,
                                      t_norm=options.tnorm, membership_mode=options.membership_mode,
+                                     hedge_guidance=options.hedge_guidance,
                                      relations=[(a, 'bound_to', b) for a, b in bindings] + relations,
                                      binding_loss_weight=options.binding_weight,
                                      predicate_strength=options.predicate_strength,
@@ -123,7 +128,8 @@ def main():
                               relations=relations, negative=options.negative,
                               refine=options.refine,
                               predicate_strength=options.predicate_strength,
-                              membership_mode=options.membership_mode, output=options.output)
+                              membership_mode=options.membership_mode, output=options.output,
+                              hedge_guidance=options.hedge_guidance)
     elif options.compare:
         # %run reuses the kernel, so a module imported before a git pull would be
         # served from sys.modules; reload so the file on disk is what runs.
@@ -136,7 +142,8 @@ def main():
                        learning_rates=rates, sharpness=options.sharpness, t_norm=options.tnorm,
                        bindings=bindings, binding_weight=options.binding_weight,
                        relations=relations, negative=options.negative,
-                       membership_mode=options.membership_mode, output=options.output)
+                       membership_mode=options.membership_mode, output=options.output,
+                       hedge_guidance=options.hedge_guidance)
 
 
 if __name__ == '__main__':

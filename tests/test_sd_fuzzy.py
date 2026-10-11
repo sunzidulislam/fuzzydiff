@@ -17,11 +17,14 @@ PROMPT = 'a red book'
 WORDS = ['red book']
 
 
-def tiny_pipeline(path, fuzzy):
+def tiny_pipeline(path, fuzzy, extra_tokens=()):
     """A randomly initialized SD 1.x stack: real modules, no weights to download."""
     vocab = {'<|startoftext|>': 0, '<|endoftext|>': 1}
     for token in ['a', 'r', 'e', 'd', 'b', 'o', 'k', 'a</w>', 'red</w>', 'book</w>']:
         vocab[token] = len(vocab)
+    for token in extra_tokens:
+        if token not in vocab:
+            vocab[token] = len(vocab)
     (path / 'vocab.json').write_text(json.dumps(vocab), encoding='utf-8')
     (path / 'merges.txt').write_text('#version: 0.2\n', encoding='utf-8')
     tokenizer = CLIPTokenizer(vocab_file=str(path / 'vocab.json'),

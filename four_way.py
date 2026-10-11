@@ -122,7 +122,7 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
                  sd_model='stable-diffusion-v1-5/stable-diffusion-v1-5', negative='',
                  sdxl_guidance=9.5, sd_guidance=7.5, sharpness=100.0, t_norm='min',
                  bindings=(), binding_weight=1.0, relations=(), refine=False,
-                 predicate_strength=2.5, output=None, membership_mode='share'):
+                 predicate_strength=2.5, output=None, membership_mode='share', hedge_guidance=False):
     words = list(words)
     directory = Path(output) if output else (
         (Path('/kaggle/working/outputs') if Path('/kaggle/working').exists()
@@ -134,7 +134,7 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
               'display_order_note': 'Presentation order, not a measured quality ranking.',
               'settings': {'steps': steps, 'fuzzy_lr': learning_rate, 'guided_steps': updates,
                            'membership_sharpness': sharpness, 't_norm': t_norm,
-                           'membership_mode': membership_mode,
+                           'membership_mode': membership_mode, 'hedge_guidance': hedge_guidance,
                            'predicate_strength': predicate_strength,
                            'bindings': [list(pair) for pair in bindings],
                            'relations': [list(item) for item in relations],
@@ -154,6 +154,8 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
                  'clip': clip_scores(namespace, image, prompt, words)}
         if store is not None:
             entry['phrase_truth'] = truths
+            entry['hedge_targets'] = getattr(store, 'hedge_targets', {})
+            entry['hedge_guidance_applied'] = bool(entry['hedge_targets'] and store.guidance_diagnostics)
             entry['guidance_diagnostics'] = list(store.guidance_diagnostics)
             entry['guidance_summary'] = namespace['summarize_guidance'](store.guidance_diagnostics)
             if entry['guidance_summary'].get('inert'):
@@ -178,7 +180,7 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
                 relations=([(attribute, 'bound_to', obj) for attribute, obj in bindings]
                            + list(relations)),
                 membership_sharpness=sharpness, t_norm=t_norm, membership_mode=membership_mode,
-                binding_loss_weight=binding_weight, pipeline=pipeline)
+                binding_loss_weight=binding_weight, pipeline=pipeline, hedge_guidance=hedge_guidance)
             # Report truths at the sharpness guidance actually used, not the default.
             record(name, image, store,
                    namespace['phrase_truth_scores'](store, 10.0, sharpness))
@@ -208,10 +210,10 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
                 refiner=refiner, alpha=10.0, membership_sharpness=sharpness,
                 predicate_strength=predicate_strength)
             record('sdxl_full', refined, truths=truths)
-            # The correction each phrase received: a deficit near 1 means the full
-            # attention boost applied, which is what degrades an image.
-            report['runs']['sdxl_full']['refinement_deficits'] = {
-                phrase: 1.0 - value for phrase, value in truths.items()}
+            # Signed corrections actually used by the refiner; negative means suppression.
+            report['runs']['sdxl_full']['refinement_weights'] = {
+                phrase: weight for phrase, weight in getattr(guided_store, 'refinement_weights', {}).items()}
+            report['runs']['sdxl_full']['hedge_targets'] = getattr(guided_store, 'hedge_targets', {})
             report['runs']['sdxl_full']['predicate_strength'] = predicate_strength
         finally:
             if refiner is not None:
@@ -244,7 +246,7 @@ def run_four_way(namespace, prompt, words, seed=42, steps=50, learning_rate=0.2,
         print('Generating sd15_fuzzy', flush=True)
         cfg, groups = run_sd.build_config(fuzzy, sd_pipeline.tokenizer, prompt, words, seed,
                                           directory, steps, sd_guidance, 512,
-                                          learning_rate, updates, sharpness, t_norm, membership_mode)
+                                          learning_rate, updates, sharpness, t_norm, membership_mode, hedge_guidance)
         cfg.binding_loss_weight = binding_weight
         image, store = run_sd.generate_fuzzy(sd_pipeline, fuzzy, cfg, groups, negative,
                                              run_sd.resolve_relations(groups,

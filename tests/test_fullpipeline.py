@@ -482,9 +482,15 @@ class NotebookRegressionTests(unittest.TestCase):
             unet.enable_gradient_checkpointing()
             indices = code['get_token_indices'](tokenizer, 'a cat', ['cat'])
 
-            def sample(updates, membership_mode='share'):
+            def sample(updates, membership_mode='share', hedge_target=None):
                 config = code['RunConfig'](prompt='a cat', height=64, width=64, n_inference_steps=2,
                     max_iter_to_alter=updates, output_path=path, membership_mode=membership_mode)
+                if hedge_target is not None:
+                    config.token_groups = [indices, [1]]
+                    config.text_span = (1, len(tokenizer.encode('a cat')) - 1)
+                    config.membership_sharpness = 5
+                    config.hedge_guidance = True
+                    config.hedge_targets = {'cat': {'tokens': indices, 'target': hedge_target}}
                 store = code['AttentionStore'](attn_res=4)
                 pipeline.register_attention_control(store)
                 output = pipeline(prompt='a cat', height=64, width=64, num_inference_steps=2,
@@ -518,6 +524,11 @@ class NotebookRegressionTests(unittest.TestCase):
             self.assertNotAlmostEqual(relative_store.guidance_diagnostics[0]['loss'],
                                       store.guidance_diagnostics[0]['loss'], places=5,
                                       msg='SDXL ignored the selected membership mode')
+            low_target, low_store = sample(1, hedge_target=0.15)
+            high_target, high_store = sample(1, hedge_target=0.85)
+            self.assertFalse(torch.equal(low_target, high_target), 'SDXL ignored hedge targets')
+            self.assertGreater(low_store.guidance_diagnostics[0]['update_rms'], 0)
+            self.assertGreater(high_store.guidance_diagnostics[0]['update_rms'], 0)
             # Exercise inherited VAE decode/postprocessing as well as the latent path.
             config = code['RunConfig'](height=64, width=64, n_inference_steps=1, max_iter_to_alter=0, output_path=path)
             result = pipeline(prompt='a cat', height=64, width=64, num_inference_steps=1, guidance_scale=1,

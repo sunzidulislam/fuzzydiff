@@ -429,3 +429,48 @@ only dry-run and all 73 CPU tests pass after the correction. GPU sampling was
 not run. Existing downloaded checkpoints can be reused by rerunning the
 corrected preparation and benchmark without `--prepare-cache` once offline
 loading confirms the needed files are present.
+
+
+## 2026-10-11: generic fuzzy-term target specification
+
+Added FUZZY_ATTRIBUTE_TARGETS to the canonical notebook with user-selected
+values: slightly=0.15, mostly=0.85, somewhat=0.35, nearly=0.90, faint=0.10,
+and almost=0.95. Keys are linguistic terms, not attribute/object phrases.
+This mapping specifies proposed experiment defaults only; it is not consumed
+by the loss and does not enforce appearance intensity. Existing HEDGE_TARGETS
+and comparative guidance are unchanged. No GPU generation was performed.
+
+
+## 2026-10-11: opt-in experimental hedge attention guidance
+
+After explicit design approval, FUZZY_ATTRIBUTE_TARGETS is now consumed when
+--hedge-guidance is enabled. Added barely, a little, relatively, moderately,
+considerably, very, and extremely. The generic targets are chosen experimental
+attention levels, not calibrated linguistic values or rendered attribute metrics.
+Existing comparative HEDGE_TARGETS remain separate and unchanged.
+
+The canonical notebook resolves case-insensitive prefix terms on tracked attribute
+phrases with explicit bound_to object relations. Token overlap is rejected, object
+presence is retained, and each targeted attribute's maximize-presence term is
+replaced by a squared penalty outside target +/- 0.05. Spatial binding remains
+active. Share membership is required; relative peak normalization is incompatible
+with these absolute attention targets. The target quantity includes the entire
+tracked phrase's tokens, including its hedge. High share targets can compete with
+object presence; this implementation does not solve that modeling limitation.
+
+SDXL full/compare/four-way and SD 1.x fuzzy generation forward the option. Refinement
+uses signed residuals: positive weights scale the existing correction, negative
+weights suppress inside-mask attention, and in-band attributes receive zero
+correction. These weights use base-stage attention and are not refiner feedback.
+Metadata records effective targets, application status, and refinement weights.
+HEDGE_GUIDANCE.md provides runnable Kaggle commands and measurement limitations.
+The separate benchmark runner does not expose the new option.
+
+Validation: all 81 CPU tests pass, including gradient directions, band behavior,
+term boundaries, multiword terms, binding validation, preserved unconditional
+refinement attention, CLI forwarding, SDXL latent changes with different targets,
+and repeatable SD 1.x random-weight image changes when enabling hedge guidance.
+All 26 notebook cells compile; modified Python runners compile. Windows sandbox
+temporary-directory errors required rerunning tests outside the sandbox. No
+pretrained models were downloaded, no GPU images were generated, and no visual
+quality improvement or target coverage accuracy has been measured.

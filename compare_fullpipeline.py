@@ -12,7 +12,7 @@ NEGATIVE = ('cartoon, anime, illustration, painting, drawing, sketch, 3d render,
 
 def run_comparison(namespace, prompt='A very fast car', words=('fast', 'car'), seed=142,
                    learning_rates=(0.2,), sharpness=100.0, t_norm='min', negative=None, bindings=(),
-                   binding_weight=1.0, membership_mode='share', output=None, relations=()):
+                   binding_weight=1.0, membership_mode='share', output=None, relations=(), hedge_guidance=False):
     pipeline = namespace['model']
     words = list(words)
     relations = list(relations) + [(attribute, 'bound_to', obj) for attribute, obj in bindings]
@@ -27,7 +27,7 @@ def run_comparison(namespace, prompt='A very fast car', words=('fast', 'car'), s
               'learning_rates': list(learning_rates),
               'membership_sharpness': sharpness, 't_norm': t_norm,
               'membership_mode': membership_mode, 'bindings': [list(pair) for pair in bindings],
-              'binding_weight': binding_weight,
+              'binding_weight': binding_weight, 'hedge_guidance': hedge_guidance,
               'relations': [list(relation) for relation in relations],
               'stage': 'base only, no refinement',
               'precision': {'unet': str(pipeline.unet.dtype),
@@ -47,6 +47,8 @@ def run_comparison(namespace, prompt='A very fast car', words=('fast', 'car'), s
         diagnostics = list(store.guidance_diagnostics) if store is not None else []
         report['runs'][label] = {'image': str(file), 'clip': scores, 'phrase_truth': truths,
                                  'guidance_diagnostics': diagnostics,
+                                 'hedge_targets': getattr(store, 'hedge_targets', {}),
+                                 'hedge_guidance_applied': bool(getattr(store, 'hedge_targets', {}) and diagnostics),
                                  'token_groups': store.token_groups if store is not None else None}
         (directory / 'comparison.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
         print(label, 'CLIP:', scores['full_text'], 'truth:', truths, 'saved:', file, flush=True)
@@ -81,7 +83,8 @@ def run_comparison(namespace, prompt='A very fast car', words=('fast', 'car'), s
                 max_iter_to_alter=updates, attend_excite_lr=rate, negative_prompt=negative_prompt,
                 relations=relations,
                 membership_sharpness=sharpness, t_norm=t_norm, pipeline=pipeline,
-                binding_loss_weight=binding_weight, membership_mode=membership_mode)
+                binding_loss_weight=binding_weight, membership_mode=membership_mode,
+                hedge_guidance=hedge_guidance)
             save(label, image, store)
         print('Compare all images in:', directory.resolve(), flush=True)
     finally:

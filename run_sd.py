@@ -79,7 +79,8 @@ class FuzzyStableDiffusionPipeline(StableDiffusionPipeline):
                                                         cfg.text_span, cfg.membership_sharpness,
                                                         getattr(cfg, 't_norm', 'min'),
                                                         getattr(cfg, 'binding_loss_weight', 1.0),
-                                                        getattr(cfg, 'membership_mode', 'share'))
+                                                        getattr(cfg, 'membership_mode', 'share'),
+                                                        getattr(cfg, 'hedge_targets', {}))
                 if not loss.requires_grad:
                     raise RuntimeError('Fuzzy loss is disconnected from the latent graph.')
                 gradient = torch.autograd.grad(loss, leaf)[0]
@@ -170,12 +171,12 @@ def build_pipeline(model_id, device, fuzzy=None):
 
 def build_config(fuzzy, tokenizer, prompt, words, seed, output_path, steps=50, guidance=7.5,
                  size=512, learning_rate=0.2, updates=25, sharpness=100.0, t_norm='min',
-                 membership_mode='share'):
+                 membership_mode='share', hedge_guidance=False):
     cfg = fuzzy['RunConfig'](prompt=prompt, seeds=[seed], n_inference_steps=steps,
                              guidance_scale=guidance, height=size, width=size,
                              max_iter_to_alter=updates, attend_excite_lr=learning_rate,
                              membership_sharpness=sharpness, t_norm=t_norm, membership_mode=membership_mode,
-                             output_path=Path(output_path))
+                             output_path=Path(output_path), hedge_guidance=hedge_guidance)
     groups = fuzzy['get_token_groups'](tokenizer, prompt, words)
     # Membership is a phrase's share of the prompt's own tokens, so the start/end
     # markers and the padding tail are excluded from the distribution.
@@ -236,7 +237,17 @@ def parse_bindings(values):
 
 
 def generate_fuzzy(pipeline, fuzzy, cfg, groups, negative_prompt='', relations=()):
+    if cfg.hedge_guidance:
+        # Relations arrive resolved; match token groups back to their phrase names.
+        names = {tuple(tokens): phrase for phrase, tokens in groups.items()}
+        named_relations = [(names[tuple(a)], verb, names[tuple(b)]) for a, verb, b in relations]
+        cfg.hedge_targets = fuzzy['resolve_hedge_targets'](groups, named_relations)
+        if not cfg.hedge_targets:
+            raise ValueError('No supported hedge prefix found in tracked attribute phrases.')
+    else:
+        cfg.hedge_targets = {}
     store = fuzzy['AttentionStore'](attn_res=cfg.attn_res)
+    store.hedge_targets = cfg.hedge_targets
     store.token_groups = groups
     store.text_span = cfg.text_span
     store.membership_mode = cfg.membership_mode
@@ -280,6 +291,8 @@ def main():
                         help='Membership sharpness; lower keeps truths graded instead of near-binary.')
     parser.add_argument('--membership-mode', choices=('share', 'relative'), default='share',
                         help='Experimental relative mode normalizes each phrase by its own spatial peak.')
+    parser.add_argument('--hedge-guidance', action='store_true',
+                        help='Experimental bound-attribute attention targets; requires share membership.')
     parser.add_argument('--tnorm', choices=('min', 'product'), default='min',
                         help="Fuzzy conjunction: 'min' gradients only the weakest phrase, 'product' all of them.")
     parser.add_argument('--bind', action='append', metavar='ATTR>OBJECT',
@@ -294,6 +307,8 @@ def main():
     parser.add_argument('--negative', default='', help='Negative prompt.')
     parser.add_argument('--output', default=None, help='Output directory.')
     options = parser.parse_args()
+    if options.hedge_guidance and (not options.fuzzy or options.membership_mode != 'share'):
+        parser.error('--hedge-guidance requires --fuzzy and --membership-mode share.')
 
     words = [word.strip() for word in options.words.split(',') if word.strip()]
     if options.fuzzy and not words:
@@ -318,7 +333,7 @@ def main():
         cfg, groups = build_config(fuzzy, pipeline.tokenizer, options.prompt, words, options.seed,
                                    output, options.steps, options.guidance, options.size,
                                    options.lr, options.updates, options.sharpness, options.tnorm,
-                                   options.membership_mode)
+                                   options.membership_mode, options.hedge_guidance)
         cfg.binding_loss_weight = options.binding_weight
         relations = resolve_relations(groups, parse_relations(options.relate)
                                       + [(a, 'bound_to', b) for a, b in parse_bindings(options.bind)])
@@ -344,6 +359,7 @@ def main():
         'prompt': options.prompt, 'object_words': words, 'words_not_in_prompt': absent,
         'seed': options.seed, 'negative_prompt': options.negative,
         'scheduler': 'DPMSolverMultistep dpmsolver++ karras', 'settings': settings,
+        'hedge_guidance_applied': bool(settings.get('hedge_targets') and diagnostics),
         'phrase_truth': truths, 'guidance_diagnostics': diagnostics, 'image': str(image_path),
         'truth_note': 'Attention-derived objective, not visual accuracy or attribute intensity.',
         'versions': {'torch': torch.__version__, 'diffusers': __import__('diffusers').__version__},

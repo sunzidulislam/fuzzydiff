@@ -18,6 +18,31 @@ class GenerationReached(Exception):
 
 
 class RunnerOptionsTests(unittest.TestCase):
+    def test_hedge_flag_reaches_full_compare_and_four_way(self):
+        for mode, module_name, function_name in (
+                ('--full', None, None),
+                ('--compare', 'compare_fullpipeline', 'run_comparison'),
+                ('--four-way', 'four_way', 'run_four_way')):
+            with self.subTest(mode=mode):
+                captured = {}
+                modules = {}
+                if module_name:
+                    module = types.ModuleType(module_name)
+                    setattr(module, function_name, lambda namespace, **kw: captured.update(kw))
+                    modules[module_name] = module
+                def capture(code, namespace):
+                    captured.update(namespace['RUN_OPTIONS'])
+                args = ['run_fullpipeline.py', mode, '--prompt', 'mostly blue vase',
+                        '--words', 'mostly blue,vase', '--bind', 'mostly blue>vase',
+                        '--hedge-guidance']
+                with patch.object(sys, 'argv', args), \
+                        patch.object(run_fullpipeline, 'exec', capture, create=True), \
+                        patch.dict(sys.modules, modules), \
+                        patch.object(run_fullpipeline.importlib, 'reload', lambda m: m), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    run_fullpipeline.main()
+                self.assertTrue(captured['hedge_guidance'])
+
     def test_full_run_passes_requested_prompt_and_fuzzy_settings_to_generation(self):
         captured = {}
 
