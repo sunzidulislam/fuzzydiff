@@ -41,6 +41,13 @@ LIMITATIONS = {
 }
 
 
+def component_commit_hash(component):
+    config = getattr(component, 'config', None)
+    if isinstance(config, dict):
+        return config.get('_commit_hash')
+    return getattr(config, '_commit_hash', None)
+
+
 def definition_code(path):
     """Select definitions/imports, never notebook model loads, batches or shell cells."""
     notebook = json.loads(Path(path).read_text(encoding='utf-8'))
@@ -181,7 +188,7 @@ class NotebookModel:
                 'definition_setup_s': self.definition_setup_s,
                 'notebook_sha256': hashlib.sha256(NOTEBOOKS[self.method].read_bytes()).hexdigest(),
                 'component_commit_hashes': {
-                    f'{i}.{name}': getattr(getattr(p, name, None), 'config', {}).get('_commit_hash')
+                    f'{i}.{name}': component_commit_hash(getattr(p, name, None))
                     for i, p in enumerate(self.pipelines)
                     for name in ('unet', 'vae', 'text_encoder', 'text_encoder_2')},
                 'adapter_notes': [

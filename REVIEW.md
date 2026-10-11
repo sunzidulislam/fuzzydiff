@@ -420,3 +420,12 @@ without erasing previous runs. The final full CPU suite passed all 72 tests;
 the additional regression reproduces the non-finite record failure. Offload
 resets can empty the device cache before each sample, now stated in the
 benchmark documentation. Kaggle execution remains unverified.
+
+An aesthetic cache-preparation attempt later exposed an HF Transformers
+metadata API mismatch: `CLIPTextConfig` is an object, not a dict. Both SDXL
+pipelines had loaded before the exception. `component_commit_hash` now accepts
+dict and config-object values, covered by a focused regression; the aesthetic
+only dry-run and all 73 CPU tests pass after the correction. GPU sampling was
+not run. Existing downloaded checkpoints can be reused by rerunning the
+corrected preparation and benchmark without `--prepare-cache` once offline
+loading confirms the needed files are present.

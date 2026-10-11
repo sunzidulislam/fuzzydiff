@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 
@@ -122,6 +123,23 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(saved[1]['status'], 'error')
         self.assertEqual(saved[1]['phase'], 'recording_diagnostics')
         self.assertIn('non-finite', saved[1]['error'])
+
+    def test_model_metadata_reads_transformers_config_commit_hash(self):
+        models = self.module('benchmark_models')
+        model = object.__new__(models.NotebookModel)
+        model.method = 'stable'
+        component = SimpleNamespace(config=SimpleNamespace(_commit_hash='revision-a'))
+        model.base = SimpleNamespace(unet=SimpleNamespace(dtype='float16'))
+        model.pipelines = [SimpleNamespace(
+            scheduler=SimpleNamespace(__class__=SimpleNamespace(__name__='TestScheduler')),
+            **{name: component for name in ('unet', 'vae', 'text_encoder', 'text_encoder_2')})]
+        model.checkpoints = ['test/model']
+        model.load_s = 3.5
+        model.load_parts = {'base': 3.5}
+        model.definition_setup_s = 0.1
+        model.options = {}
+        metadata = model.metadata()
+        self.assertEqual(metadata['component_commit_hashes']['0.text_encoder'], 'revision-a')
 
     def test_all_actual_notebooks_load_definitions_without_pretrained_models(self):
         models = self.module('benchmark_models')
