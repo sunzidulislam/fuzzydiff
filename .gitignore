@@ -5,3 +5,5 @@ outputs/
 .venv*/
 docs
 attention_results
+.worktrees/
+.superpowers/
