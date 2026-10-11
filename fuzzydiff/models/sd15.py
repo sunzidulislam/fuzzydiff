@@ -274,3 +274,26 @@ def missing_words(tokenizer, prompt, words):
 def main(argv=None):
     from fuzzydiff.cli.sd15 import main as entry
     return entry(argv)
+
+
+from .session import ModelSession
+
+
+class PlainSD15Session(ModelSession):
+    def __init__(self, method, options):
+        self.method, self.options = method, options
+        self.pipelines, self.ns, self.last_details = [], {}, {}
+        self.original_processors = []
+        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        self.base = build_pipeline(DEFAULT_MODEL, self.device)
+        self.pipelines = [self.base]
+        self.original_processors = [dict(self.base.unet.attn_processors)]
+
+    def generate(self, seed, ledger=None):
+        o = self.options
+        return generate_plain(self.base, o['prompt'], seed, o['steps'], o['guidance'], o['size'], o['negative'])
+
+    def metadata(self):
+        return {'checkpoints': [DEFAULT_MODEL], 'dtype': str(self.base.unet.dtype),
+                'effective_sampling_settings': {k: self.options[k] for k in ('steps', 'guidance', 'size')},
+                'schedulers': [type(self.base.scheduler).__name__], 'limitations': []}
