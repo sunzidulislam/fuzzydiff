@@ -1,0 +1,8 @@
+{
+ "model": "sdxl_turbo",
+ "prompt": "A red ball beside a blue cube.",
+ "seed": 142,
+ "size": 512,
+ "steps": 4,
+ "guidance": 0
+}

@@ -5,6 +5,32 @@ from types import SimpleNamespace
 
 
 class ModelRegistryTests(unittest.TestCase):
+    def test_fuzzy_session_forwards_bound_hedges_and_relations_to_notebook(self):
+        import torch
+        from fuzzydiff.models.sdxl import SDXLSession
+        from contextlib import nullcontext
+        seen = {}
+        image = object()
+        def generate(*args, **kwargs):
+            seen.update(kwargs)
+            return image, None, SimpleNamespace(guidance_diagnostics=[])
+        session = object.__new__(SDXLSession)
+        session.method = 'fuzzydiff'
+        session.base = SimpleNamespace(maybe_free_model_hooks=lambda: None)
+        session.refiner = object()
+        session.ns = {'generate': generate, 'refine_with_predicate': lambda *a, **kw: image}
+        session.options = dict(steps=50, guidance=7.5, size=512, updates=30, lr=5,
+            sharpness=20, tnorm='product', membership_mode='share', negative='',
+            bindings=[('mostly blue', 'vase')], relations=[('vase', 'above', 'table')],
+            binding_weight=2, hedge_guidance=True, refine_strength=.4, refine_steps=30,
+            predicate_strength=.5)
+        session.last_details = {}
+        session._generate(42, {}, 'mostly blue vase on table', ['mostly blue', 'vase', 'table'],
+                          torch.Generator().manual_seed(42), {}, [], lambda name: nullcontext())
+        self.assertEqual(seen['relations'], [('mostly blue', 'bound_to', 'vase'), ('vase', 'above', 'table')])
+        self.assertTrue(seen['hedge_guidance'])
+        self.assertEqual(seen['binding_loss_weight'], 2)
+
     def test_aliases_remain_truthful_without_torch_imports(self):
         code = '''import sys
 sys.modules['torch'] = None

@@ -1,0 +1,10 @@
+{
+ "model": "fuzzydiff_full",
+ "prompt": "A red ball beside a blue cube.",
+ "words": ["red ball", "blue cube"],
+ "seed": 142,
+ "size": 512,
+ "steps": 50,
+ "guidance": 7.5,
+ "method_options": {"lr": 5, "sharpness": 20, "tnorm": "product", "predicate_strength": 0.5}
+}

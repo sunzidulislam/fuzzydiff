@@ -59,7 +59,10 @@ class SDXLSession(ModelSession):
             height=o['size'], width=o['size'], max_iter_to_alter=o['updates'],
             attend_excite_lr=o['lr'], membership_sharpness=o['sharpness'],
             t_norm=o['tnorm'], membership_mode=o['membership_mode'],
-            negative_prompt=o['negative'], relations=[(a, 'bound_to', b) for a, b in o['bindings']],
+            negative_prompt=o['negative'],
+            relations=[(a, 'bound_to', b) for a, b in o['bindings']] + list(o.get('relations', ())),
+            binding_loss_weight=o.get('binding_weight', 1.0),
+            hedge_guidance=o.get('hedge_guidance', False),
             pipeline=self.base)
         self.base.maybe_free_model_hooks()
         self.last_details['guidance_diagnostics'] = list(store.guidance_diagnostics)
