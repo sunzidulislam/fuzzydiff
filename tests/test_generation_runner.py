@@ -6,6 +6,19 @@ from unittest.mock import patch
 
 
 class GenerationTests(unittest.TestCase):
+    def test_malformed_config_and_example_requests_are_validated_without_models(self):
+        from fuzzydiff.config import load_request_config, merge_request_config
+        root = Path(__file__).resolve().parents[1]
+        for name in ('generate_fuzzydiff', 'generate_sdxl_turbo'):
+            request = merge_request_config(load_request_config(root / f'configs/{name}.json'), {})
+            self.assertEqual(request.seed, 142)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'bad.json'
+            for text in ('[1]', '{broken'):
+                path.write_text(text)
+                with self.assertRaises(ValueError):
+                    load_request_config(path)
+
     def test_single_generation_saves_final_image_and_cleans_up(self):
         from PIL import Image
         from fuzzydiff.generation.requests import GenerationRequest

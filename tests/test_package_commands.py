@@ -11,6 +11,39 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PackageCommandTests(unittest.TestCase):
+    def test_benchmark_config_defaults_and_explicit_flag_precedence(self):
+        from fuzzydiff.cli.benchmark import parse_options
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'pilot.json'
+            path.write_text(json.dumps({'prompt': 'a ball', 'words': ['ball'],
+                'methods': ['enhancing'], 'seeds': [42], 'repeats': 1, 'steps': 4, 'guidance': 0}))
+            options = parse_options(['--config', str(path), '--seeds', '142', '--dry-run'])
+            self.assertEqual(options['seeds'], [142])
+            self.assertEqual(options['methods'], ['enhancing'])
+            self.assertEqual(options['steps'], 4)
+            path.write_text(json.dumps({'unknown': 'bad'}))
+            with self.assertRaises(SystemExit):
+                parse_options(['--config', str(path)])
+
+    def test_kaggle_reload_refreshes_package_owner_and_legacy_reference(self):
+        import run_fullpipeline
+        from fuzzydiff.compatibility import reload_workflow
+        old = run_fullpipeline.main
+        reload_workflow('full')
+        self.assertIsNot(run_fullpipeline.main, old)
+        from fuzzydiff.cli import full_pipeline
+        self.assertIs(run_fullpipeline, full_pipeline)
+
+    def test_help_and_reporting_do_not_require_torch(self):
+        code = '''import sys
+sys.modules['torch'] = None
+from fuzzydiff.reporting import timing, tables
+from fuzzydiff.cli.generate import main
+main(['--help'])
+'''
+        result = subprocess.run([sys.executable, '-c', code], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_full_cli_is_lightweight_from_external_directory(self):
         result = subprocess.run([sys.executable, str(ROOT / 'run_fullpipeline.py'), '--check'],
                                 cwd=ROOT.parent, capture_output=True, text=True)

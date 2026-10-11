@@ -1,10 +1,20 @@
 # FuzzyDiff: Fuzzy Logical Diffusion for Structured and Graded Image Generation
 
-FuzzyDiff introduces **fuzzy-logic-guided diffusion** to improve text-to-image generation when prompts contain **graded, uncertain, or softly constrained semantics** such as *slightly*, *moderately*, or *roughly*. The method integrates **fuzzy reasoning directly into the denoising process**, enabling diffusion models to better interpret linguistic uncertainty and produce more semantically faithful images.
+FuzzyDiff is a research implementation of fuzzy-logic-guided diffusion.
+It optimizes attention-derived phrase objectives during denoising and reuses
+membership maps for SDXL refinement. The canonical notebook owns the scientific
+logic; the Python package supplies model adapters and reproducible workflows.
+
+**Evidence status:** CPU regression tests verify execution and gradients.
+No measured image-quality improvement has been established. Attention truth and
+chosen hedge targets are not visual accuracy, dust coverage, or calibrated language
+measurements. See [REVIEW.md](REVIEW.md) and [HEDGE_GUIDANCE.md](HEDGE_GUIDANCE.md).
 
 ---
 
-# Abstract
+# Draft paper abstract
+
+The following manuscript claims are unverified; they are not experimental findings.
 
 Diffusion models have demonstrated impressive text-to-image generation capabilities, producing high-fidelity images from natural-language prompts. However, they often struggle when prompts contain **graded or uncertain semantics**, frequently yielding **missing or inconsistent objects**. To address this, we propose **FuzzyDiff**, a fuzzy-logic-guided diffusion framework that explicitly represents linguistic uncertainty and propagates it throughout the denoising process to improve prompt-faithful image synthesis. FuzzyDiff converts cross-attention maps into **phrase-level spatial membership functions**, enabling prompt statements to be evaluated as **differentiable, graded truth values rather than binary constraints**. In addition, we introduce a **spatially guided attention refinement** that further strengthens attribute completeness by correcting residual omissions and refining weakly grounded regions. Extensive experiments on diverse prompts with **hedges and multi-attribute compositions** show that FuzzyDiff improves semantic faithfulness and reduces **missing-attribute failures** while maintaining strong visual quality, demonstrating the benefit of integrating **fuzzy reasoning into diffusion-based image generation**.
 
@@ -14,7 +24,7 @@ Diffusion models have demonstrated impressive text-to-image generation capabilit
 
 ![Fuzzy Attribute Impact](https://github.com/user-attachments/assets/817ae9df-f509-4fe7-bb39-b87c069de08e)
 
-FuzzyDiff enables diffusion models to interpret **graded linguistic modifiers** and translate them into consistent visual changes.
+The image examples illustrate intended graded semantics; they do not establish measured control or improvement.
 
 Examples include:
 
@@ -23,7 +33,7 @@ Examples include:
 * **Lighting strength**: Indoor scenes evolve from *dimly lit* to *brightly illuminated* environments.
 * **Object quantity**: Underwater scenes gradually increase the number of fish from *few* to *many*.
 
-These examples demonstrate that **FuzzyDiff captures gradual semantic changes and translates them into coherent visual transformations.**
+Evaluate these interpretations with matched prompts/seeds and independent visual judgments before claiming gradual semantic control.
 
 ---
 
@@ -104,6 +114,122 @@ pip install git+https://github.com/openai/CLIP.git
 ```
 
 ---
+
+# Repository structure
+
+```text
+fuzzydiff/
+  paths.py, config.py, notebook_runtime.py
+  models/       registry, SD 1.5, archived adapters, SDXL, Turbo, sessions
+  generation/   requests, results, one-image runner
+  experiments/  benchmark, comparison, snow studies and controls
+  reporting/    exclusive timing and measured-data tables
+  cli/          generation, full pipeline, benchmark, snow entry points
+pipeline_fuzzy/ canonical and archived notebooks (scientific source)
+configs/        JSON generation and benchmark examples
+tests/          CPU regression tests with random weights
+outputs/        ignored experiment results
+run_*.py        compatible legacy commands
+```
+
+Run from the repository checkout; no editable install or new dependencies are
+required. Keep the whole package and notebooks when copying this repository to
+Kaggle. Root commands resolve their notebooks even from another working directory.
+
+## Generate one image
+
+This command generates only the final requested image. It performs no warmups,
+timing repetitions, or profiling. `--output` saves `seed_142.png` and
+`seed_142_metadata.json`; `--display` optionally shows that image in IPython.
+
+```python
+import subprocess
+import sys
+
+subprocess.run([
+    sys.executable, "-m", "fuzzydiff.cli.generate",
+    "--model", "fuzzydiff_full",
+    "--prompt", "A red ball beside a blue cube.",
+    "--words", "red ball,blue cube", "--seed", "142",
+    "--negative", "blurry, distorted shapes, fused objects, text, watermark",
+    "--output", "/kaggle/working/outputs/ball_cube_fuzzy",
+], check=True)
+```
+
+Use the same command with any of these model values:
+
+| Model value | Legacy alias | Actual implementation |
+|---|---|---|
+| `sd14` | `stable` | Archived plain SD 1.4, PNDM |
+| `attend_archived` | `attend` | Archived SD 1.5 Attend; detached attention, unvalidated |
+| `predicate_archived` | `predicate` | Archived SD 1.4 Predicate, FP32, unvalidated |
+| `sdxl_base_refiner` | `aesthetic` | Ordinary SDXL base + refiner, not SPO |
+| `sdxl_turbo` | `enhancing` | Stock SDXL-Turbo, 4 steps/CFG=0, not C3 |
+| `fuzzydiff_full` | `fuzzydiff` | Canonical fuzzy guidance + refinement |
+| `sd15` | — | Plain SD 1.5, DPMSolver++ Karras |
+
+For each row, a one-image example is:
+
+```bash
+python -m fuzzydiff.cli.generate --model sd14 --prompt "A red ball beside a blue cube." --seed 142 --output outputs/sd14
+python -m fuzzydiff.cli.generate --model attend_archived --prompt "A red ball beside a blue cube." --words "red ball,blue cube" --seed 142 --output outputs/attend
+python -m fuzzydiff.cli.generate --model predicate_archived --prompt "A red ball beside a blue cube." --words "red ball,blue cube" --seed 142 --output outputs/predicate
+python -m fuzzydiff.cli.generate --model sdxl_base_refiner --prompt "A red ball beside a blue cube." --seed 142 --output outputs/sdxl
+python -m fuzzydiff.cli.generate --model sdxl_turbo --prompt "A red ball beside a blue cube." --seed 142 --output outputs/turbo
+python -m fuzzydiff.cli.generate --model fuzzydiff_full --prompt "A red ball beside a blue cube." --words "red ball,blue cube" --seed 142 --output outputs/fuzzy
+python -m fuzzydiff.cli.generate --model sd15 --prompt "A red ball beside a blue cube." --seed 142 --output outputs/sd15
+```
+
+Steps/CFG default to 50/7.5 except Turbo's native 4/0. Full FuzzyDiff's direct
+interface retains the benchmark adapter's 5 learning rate, 20 sharpness, product
+t-norm, 30 guided steps, and 0.5 predicate strength. The legacy notebook command
+retains its own existing defaults and stage filenames. Unsupported method options
+fail early; archived negative-prompt limitations are recorded in metadata.
+
+JSON examples are in `configs/`. Explicit flags override their defaults:
+
+```bash
+python -m fuzzydiff.cli.generate --config configs/generate_fuzzydiff.json --seed 999 --output outputs/fuzzy999
+python -m fuzzydiff.cli.benchmark --config configs/benchmark_pilot.json --dry-run
+```
+
+For Python use, generation and display are separate operations:
+
+```python
+from fuzzydiff.generation.requests import GenerationRequest
+from fuzzydiff.generation.runner import generate_image
+from IPython.display import display
+
+result = generate_image(GenerationRequest(
+    model="fuzzydiff_full", prompt="A red ball beside a blue cube.",
+    words=("red ball", "blue cube"), seed=142))
+display(result.image)
+```
+
+## Experiments and reloads
+
+Whole-model timing combines base/refinement in each main row; profiled components
+come from a separate pass. Read [BENCHMARK.md](BENCHMARK.md) for its limitations.
+Snow workflows retain code-fingerprint resume checks; use fresh output directories
+after this refactor. Saved artifacts may still be reviewed without resampling.
+
+```bash
+python -m fuzzydiff.cli.full_pipeline --check
+python -m fuzzydiff.cli.benchmark --prompt "A red ball beside a blue cube." --words "red ball,blue cube" --dry-run
+python -m fuzzydiff.cli.snow --plan
+python -m fuzzydiff.cli.snow_control --plan
+python -m unittest discover -s tests
+```
+
+After `git pull`, `%run run_fullpipeline.py`, `%run run_sd.py`, and other root
+commands refresh loaded package owners automatically. Before direct Python calls
+in an existing kernel, refresh and import your functions again:
+
+```python
+from fuzzydiff.compatibility import reload_workflow
+reload_workflow("generate")  # also: full, sd15, benchmark, snow
+from fuzzydiff.generation.runner import generate_image
+```
 
 # Usage
 

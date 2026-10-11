@@ -1,9 +1,10 @@
 """Run one model once; explicit saving, no benchmark warmups or profiling."""
 import json
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from fuzzydiff.models.registry import create_session, resolve_model
+from fuzzydiff.models.registry import create_session, resolve_model, close_session
 from fuzzydiff.notebook_runtime import source_hashes
 from fuzzydiff.paths import repository_root
 from .requests import GenerationRequest, GenerationResult
@@ -35,7 +36,7 @@ def generate_image(request: GenerationRequest) -> GenerationResult:
         metadata['source_sha256'] = source_hashes(paths)
         return GenerationResult(image, metadata, diagnostics)
     finally:
-        session.close()
+        close_session(session, sys.exc_info()[1])
 
 
 def save_result(result: GenerationResult, directory: Path, seed: int) -> dict[str, Path]:

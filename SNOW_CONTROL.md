@@ -87,3 +87,11 @@ perceived depth still require independent human evaluation.
 
 CLIPSeg's text-conditioned segmentation interface is documented by
 [Hugging Face](https://huggingface.co/docs/transformers/en/model_doc/clipseg).
+
+## Package entry
+
+`python -m fuzzydiff.cli.snow_control --plan` is the package equivalent of the
+legacy root command. Implementation modules now live in
+`fuzzydiff/experiments/snow/`. Fingerprints cover those source files and the
+notebook loader. Start a fresh output directory after this refactor; existing
+study/control manifests must not be relabeled to pass resume checks.

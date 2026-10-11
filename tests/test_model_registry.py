@@ -11,14 +11,19 @@ class ModelRegistryTests(unittest.TestCase):
         from contextlib import nullcontext
         seen = {}
         image = object()
+        store = SimpleNamespace(guidance_diagnostics=[], hedge_targets={'mostly blue': {'target': .85}},
+                                token_groups={'vase': [3]})
         def generate(*args, **kwargs):
             seen.update(kwargs)
-            return image, None, SimpleNamespace(guidance_diagnostics=[])
+            return image, None, store
+        def refine(*args, **kwargs):
+            store.refinement_weights = {'mostly blue': -.2}
+            return image
         session = object.__new__(SDXLSession)
         session.method = 'fuzzydiff'
         session.base = SimpleNamespace(maybe_free_model_hooks=lambda: None)
         session.refiner = object()
-        session.ns = {'generate': generate, 'refine_with_predicate': lambda *a, **kw: image}
+        session.ns = {'generate': generate, 'refine_with_predicate': refine}
         session.options = dict(steps=50, guidance=7.5, size=512, updates=30, lr=5,
             sharpness=20, tnorm='product', membership_mode='share', negative='',
             bindings=[('mostly blue', 'vase')], relations=[('vase', 'above', 'table')],
@@ -30,6 +35,23 @@ class ModelRegistryTests(unittest.TestCase):
         self.assertEqual(seen['relations'], [('mostly blue', 'bound_to', 'vase'), ('vase', 'above', 'table')])
         self.assertTrue(seen['hedge_guidance'])
         self.assertEqual(seen['binding_loss_weight'], 2)
+        self.assertEqual(session.last_details['hedge_targets']['mostly blue']['target'], .85)
+        self.assertEqual(session.last_details['refinement_weights'], {'mostly blue': -.2})
+
+    def test_close_attempts_every_pipeline_when_a_hook_fails(self):
+        from fuzzydiff.models.session import ModelSession
+        calls = []
+        def broken():
+            calls.append('first')
+            raise RuntimeError('hook failed')
+        session = object.__new__(ModelSession)
+        session.pipelines = [SimpleNamespace(maybe_free_model_hooks=broken),
+                             SimpleNamespace(maybe_free_model_hooks=lambda: calls.append('second'))]
+        session.original_processors = []
+        with self.assertRaises(RuntimeError):
+            session.close()
+        self.assertEqual(calls, ['first', 'second'])
+        self.assertEqual(session.pipelines, [])
 
     def test_aliases_remain_truthful_without_torch_imports(self):
         code = '''import sys
@@ -74,6 +96,7 @@ else:
                 raise ValueError('bad checkpoint')
             def close(self):
                 events.append('closed')
+                raise RuntimeError('secondary cleanup error')
         with patch.object(registry, 'adapter_class', return_value=Broken):
             with self.assertRaisesRegex(ValueError, 'bad checkpoint'):
                 registry.create_session('enhancing', {})

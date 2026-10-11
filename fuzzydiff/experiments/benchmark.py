@@ -17,7 +17,7 @@ import traceback
 from pathlib import Path
 from time import perf_counter
 
-from fuzzydiff.models.registry import LABELS, LIMITATIONS, NOTEBOOKS
+from fuzzydiff.models.registry import LABELS, LIMITATIONS, NOTEBOOKS, close_session
 
 
 from fuzzydiff.reporting.tables import write_json, append_record, summarize, save_reports
@@ -142,7 +142,7 @@ def run_worker(method, options):
         return 1
     finally:
         if model is not None:
-            model.close()
+            close_session(model, sys.exc_info()[1])
 
 
 def launch_worker(method, config_path, directory, preparing=False):

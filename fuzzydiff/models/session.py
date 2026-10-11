@@ -5,7 +5,7 @@ from functools import wraps
 from pathlib import Path
 from time import perf_counter
 
-from .registry import NOTEBOOKS, LIMITATIONS, effective_sampling_settings, adapter_class, create_session
+from .registry import NOTEBOOKS, LIMITATIONS, effective_sampling_settings, adapter_class, create_session, close_session
 from fuzzydiff.notebook_runtime import load_definitions
 
 
@@ -42,9 +42,9 @@ class ModelSession:
             return result
 
         def place(pipeline):
+            self.pipelines.append(pipeline)
             pipeline.enable_model_cpu_offload(gpu_id=0)
             pipeline.set_progress_bar_config(disable=True)
-            self.pipelines.append(pipeline)
             return pipeline
 
         self._load(load, place, common)
@@ -134,23 +134,30 @@ class ModelSession:
         return self
 
     def __exit__(self, exc_type, exc, traceback):
-        self.close()
+        close_session(self, exc)
 
     def close(self):
         pipelines = getattr(self, 'pipelines', [])
         originals = getattr(self, 'original_processors', [])
+        errors = []
         try:
             for index, pipeline in enumerate(pipelines):
                 try:
                     if index < len(originals):
                         pipeline.unet.set_attn_processor(dict(originals[index]))
-                finally:
+                except Exception as error:
+                    errors.append(error)
+                try:
                     pipeline.maybe_free_model_hooks()
+                except Exception as error:
+                    errors.append(error)
         finally:
             self.pipelines = []
             self.base = self.refiner = None
             self.ns = {}
             self.original_processors = []
+        if errors:
+            raise RuntimeError('Model cleanup failed: ' + '; '.join(str(error) for error in errors)) from errors[0]
 
 
 class NotebookModel(ModelSession):

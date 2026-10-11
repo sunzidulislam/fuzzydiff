@@ -104,3 +104,11 @@ CSV sheets and analyze with:
 
 Local CPU tests validate orchestration, artifact creation and rating analysis.
 They do not establish T4 memory use, runtime, or generated image quality.
+
+## Package entry
+
+`python -m fuzzydiff.cli.snow --plan` is the package equivalent of the
+legacy root command. Implementation modules now live in
+`fuzzydiff/experiments/snow/`. Fingerprints cover those source files and the
+notebook loader. Start a fresh output directory after this refactor; existing
+study/control manifests must not be relabeled to pass resume checks.

@@ -1,0 +1,16 @@
+{
+ "prompt": "A red ball beside a blue cube.",
+ "words": ["red ball", "blue cube"],
+ "methods": ["stable", "attend", "predicate", "aesthetic", "enhancing", "fuzzydiff"],
+ "seeds": [142],
+ "repeats": 1,
+ "warmup": 1,
+ "steps": 50,
+ "size": 512,
+ "guidance": 7.5,
+ "lr": 5,
+ "sharpness": 20,
+ "tnorm": "product",
+ "predicate_strength": 0.5,
+ "output": "/kaggle/working/outputs/ball_cube_benchmark"
+}

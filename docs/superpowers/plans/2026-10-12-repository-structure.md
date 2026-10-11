@@ -1,6 +1,6 @@
 # Repository Structure Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Refactor the research scripts into the approved Python package while preserving existing commands and adding ordinary single-image generation independent of benchmarking.
 
@@ -54,12 +54,12 @@ assets remain outside this migration.
 - `definition_code(path: Path) -> CodeType`, `load_definitions(path: Path) -> dict`: archived AST loading with the existing import filters and module registration for dataclasses.
 - `source_hashes(paths: Iterable[Path]) -> dict[str, str]`: repository-relative keys, actual source bytes, no silent omission of required files.
 
-- [ ] Write tests asserting root resolution after changing cwd, string/list notebook source support, cell-index preservation, unchanged notebook bytes, prefix loading, and skipped batch/download calls. Include `FUZZY_ATTRIBUTE_TARGETS` in an AST fixture and exercise a function referencing it.
-- [ ] Run `.venv-cpu/Scripts/python.exe -m unittest discover -s tests -p test_notebook_runtime.py`; verify missing-package/function failures before implementation.
-- [ ] Implement paths/runtime helpers using the existing loader bodies and explicit policies. Add `FUZZY_ATTRIBUTE_TARGETS` to the allowed assignment names alongside `HEDGE_TARGETS` and `RELATION_VERBS`; do not broaden arbitrary notebook execution.
-- [ ] Delegate existing readers to these helpers without changing caller namespaces, prefixes, skipped cell numbers, or model initialization.
-- [ ] Run the new runtime tests and current fullpipeline/SD/benchmark/snow-GPU tests. `python run_fullpipeline.py --check` must compile the same code-cell count without model imports.
-- [ ] Commit only Task 1 source/tests: `refactor: centralize notebook runtime and repository paths`.
+- [x] Write tests asserting root resolution after changing cwd, string/list notebook source support, cell-index preservation, unchanged notebook bytes, prefix loading, and skipped batch/download calls. Include `FUZZY_ATTRIBUTE_TARGETS` in an AST fixture and exercise a function referencing it.
+- [x] Run `.venv-cpu/Scripts/python.exe -m unittest discover -s tests -p test_notebook_runtime.py`; verify missing-package/function failures before implementation.
+- [x] Implement paths/runtime helpers using the existing loader bodies and explicit policies. Add `FUZZY_ATTRIBUTE_TARGETS` to the allowed assignment names alongside `HEDGE_TARGETS` and `RELATION_VERBS`; do not broaden arbitrary notebook execution.
+- [x] Delegate existing readers to these helpers without changing caller namespaces, prefixes, skipped cell numbers, or model initialization.
+- [x] Run the new runtime tests and current fullpipeline/SD/benchmark/snow-GPU tests. `python run_fullpipeline.py --check` must compile the same code-cell count without model imports.
+- [x] Commit only Task 1 source/tests: `refactor: centralize notebook runtime and repository paths`.
 
 ## Task 2: SD 1.x adapter and compatible import seam
 
@@ -69,12 +69,12 @@ assets remain outside this migration.
 
 **Interfaces produced:** Preserve signatures of `FuzzyStableDiffusionPipeline`, `load_fuzzy_definitions`, `configure`, `build_pipeline`, `build_config`, relation/binding helpers, `generate_fuzzy`, and `generate_plain` in `models/sd15.py`. `cli/sd15.py:main(argv: list[str] | None = None) -> int` owns parsing and file output.
 
-- [ ] Write a compatibility test asserting legacy `run_sd` imports resolve the same callable objects and shared globals as `fuzzydiff.models.sd15`. Verify patching a legacy helper affects the sampling caller and reloading preserves availability.
-- [ ] Run the new test and observe import/identity failures.
-- [ ] Move the existing sampling/setup/helpers into `models/sd15.py`, delegating notebook loading to Task 1. Move CLI code into `cli/sd15.py`; expose legacy `main` through an explicit facade callable with a lazy CLI import.
-- [ ] Implement a root `run_sd.py` facade that executes CLI main when run as a script and preserves shared import state when imported. Avoid copied function implementations and avoid star-import snapshots of mutable globals.
-- [ ] Run package compatibility tests and all `test_sd_fuzzy.py` random-weight tests. Preserve the maintained SD 1.5 checkpoint, DPMSolver++ Karras scheduler, and seeded pixels.
-- [ ] Commit: `refactor: extract SD generation adapter and CLI`.
+- [x] Write a compatibility test asserting legacy `run_sd` imports resolve the same callable objects and shared globals as `fuzzydiff.models.sd15`. Verify patching a legacy helper affects the sampling caller and reloading preserves availability.
+- [x] Run the new test and observe import/identity failures.
+- [x] Move the existing sampling/setup/helpers into `models/sd15.py`, delegating notebook loading to Task 1. Move CLI code into `cli/sd15.py`; expose legacy `main` through an explicit facade callable with a lazy CLI import.
+- [x] Implement a root `run_sd.py` facade that executes CLI main when run as a script and preserves shared import state when imported. Avoid copied function implementations and avoid star-import snapshots of mutable globals.
+- [x] Run package compatibility tests and all `test_sd_fuzzy.py` random-weight tests. Preserve the maintained SD 1.5 checkpoint, DPMSolver++ Karras scheduler, and seeded pixels.
+- [x] Commit: `refactor: extract SD generation adapter and CLI`.
 
 ## Task 3: Registry and reusable model sessions
 
@@ -89,13 +89,13 @@ assets remain outside this migration.
 - Session interface: `generate(seed: int, ledger=None) -> Image.Image`, `reset() -> None`, `close() -> None`, `metadata() -> dict`, `profile_preprocessing(ledger)` context manager, `pipelines`, `last_details`; context-manager entry returns the session, exit closes it.
 - Legacy `NotebookModel(method, options)` delegates to `create_session`, preserving its existing methods/properties without a second branch-based implementation.
 
-- [ ] Test every old alias against its descriptive identity; `stable` must resolve to SD 1.4, `enhancing` to Turbo, `aesthetic` to ordinary SDXL base/refiner. Test unknown IDs and data-only registry import with Torch unavailable.
-- [ ] Test factory selection, ownership/cleanup on exceptions, Turbo's 4 steps/CFG=0, Predicate's FP32, and effective settings/provenance using injected or patched loaders that never download weights.
-- [ ] Run registry tests and verify they fail on absent interfaces.
-- [ ] Extract the existing `NotebookModel` branches into concrete adapters, preserving generation bodies and existing limitations. Each adapter delegates notebook-defined algorithms; share lifecycle/loading utilities only where behavior is actually common.
-- [ ] Preserve base/refiner VAE separation, offload-hook ordering, attention restoration, negative-prompt limitations, and profile access. Fuzzy session loading must include the constants and helper definitions used by hedge refinement.
-- [ ] Run existing benchmark definition/metadata/instrumentation tests plus new registry tests. Compare SD 1.x and SDXL random-weight seeded outputs across the extracted adapter seam.
-- [ ] Commit: `refactor: introduce model registry and generation sessions`.
+- [x] Test every old alias against its descriptive identity; `stable` must resolve to SD 1.4, `enhancing` to Turbo, `aesthetic` to ordinary SDXL base/refiner. Test unknown IDs and data-only registry import with Torch unavailable.
+- [x] Test factory selection, ownership/cleanup on exceptions, Turbo's 4 steps/CFG=0, Predicate's FP32, and effective settings/provenance using injected or patched loaders that never download weights.
+- [x] Run registry tests and verify they fail on absent interfaces.
+- [x] Extract the existing `NotebookModel` branches into concrete adapters, preserving generation bodies and existing limitations. Each adapter delegates notebook-defined algorithms; share lifecycle/loading utilities only where behavior is actually common.
+- [x] Preserve base/refiner VAE separation, offload-hook ordering, attention restoration, negative-prompt limitations, and profile access. Fuzzy session loading must include the constants and helper definitions used by hedge refinement.
+- [x] Run existing benchmark definition/metadata/instrumentation tests plus new registry tests. Compare SD 1.x and SDXL random-weight seeded outputs across the extracted adapter seam.
+- [x] Commit: `refactor: introduce model registry and generation sessions`.
 
 ## Task 4: Ordinary generation request, runner, and command
 
@@ -111,13 +111,13 @@ assets remain outside this migration.
 - `load_request_config(path: Path) -> dict`, `merge_request_config(config: dict, explicit_flags: dict) -> GenerationRequest` in `config.py`: flags override JSON; reject unknown config fields.
 - `cli/generate.py:main(argv=None) -> int`: model/prompt/seed/words/negative/size/steps/guidance, existing fuzzy method options, `--config`, `--output`, `--display`.
 
-- [ ] Test exactly one session generation, no timing/profile calls, cleanup on failure, default/effective settings, unknown options, invalid seeds, malformed JSON, and explicit-flag precedence. Mock display and assert only the final requested image is displayed once.
-- [ ] Run generation tests and verify missing interface failures.
-- [ ] Implement data-only request validation and registry-driven defaults. Convert request fields into existing adapter options; do not change mathematical defaults or repurpose attention truth as visual accuracy.
-- [ ] Implement the runner and explicit image/JSON saving. Heavy imports occur only inside generation; `--help` and config validation remain CPU/lightweight. Import IPython only for `--display`.
-- [ ] Add JSON examples and test them against the same parser/schema. Use dummy model sessions and existing random-weight fixtures; never download pretrained checkpoints.
-- [ ] Run runner/config tests and single-image dry validation. Confirm benchmark and snow code are not imported by ordinary generation.
-- [ ] Commit: `feat: add direct model generation interface`.
+- [x] Test exactly one session generation, no timing/profile calls, cleanup on failure, default/effective settings, unknown options, invalid seeds, malformed JSON, and explicit-flag precedence. Mock display and assert only the final requested image is displayed once.
+- [x] Run generation tests and verify missing interface failures.
+- [x] Implement data-only request validation and registry-driven defaults. Convert request fields into existing adapter options; do not change mathematical defaults or repurpose attention truth as visual accuracy.
+- [x] Implement the runner and explicit image/JSON saving. Heavy imports occur only inside generation; `--help` and config validation remain CPU/lightweight. Import IPython only for `--display`.
+- [x] Add JSON examples and test them against the same parser/schema. Use dummy model sessions and existing random-weight fixtures; never download pretrained checkpoints.
+- [x] Run runner/config tests and single-image dry validation. Confirm benchmark and snow code are not imported by ordinary generation.
+- [x] Commit: `feat: add direct model generation interface`.
 
 ## Task 5: Benchmark, comparisons, reporting, and full CLI
 
@@ -127,15 +127,15 @@ assets remain outside this migration.
 
 **Interfaces produced:** Preserve existing `TimeLedger`, instrumentation functions, summary/report helpers, `run_worker`, `launch_worker`, `run_comparison`, and `run_four_way` signatures. `cli/benchmark.py:main(argv=None) -> int` supports the existing internal `--worker` dispatch. `cli/full_pipeline.py:main(argv=None)` preserves existing flags/dispatch and notebook execution.
 
-- [ ] Test old and `python -m` commands with the same arguments; capture dispatch/settings without models. Test `--worker` in a fresh CPU-only subprocess, external cwd, root import patching, and package reload state.
-- [ ] Test report schemas/whole-model stage grouping and exclusive ledger accounting through the new ownership. Assert source hashes cover the registry, model adapters, runtime, orchestration, reports, and notebooks rather than only facades.
-- [ ] Run command tests and verify missing package command failures.
-- [ ] Move timing to reporting and split report formatting from worker orchestration. Move comparisons into their package owner and retain the plain -> fuzzy-base -> full distinction and current grid labels/CLIP behavior.
-- [ ] Launch workers as `python -m fuzzydiff.cli.benchmark --worker ...` with `cwd=repository_root()` and absolute config/output paths. Retain offline loading for measured workers and separate cache-preparation workers.
-- [ ] Add reload handling for actual adapter/comparison modules, preserving existing `%run` defenses. Preserve the canonical notebook full-run entry cell, its filename convention, and RUN_OPTIONS forwarding.
-- [ ] Replace root modules with compatible script/import facades. Update provenance paths using Task 1 helpers and maintain existing JSON field names, failures, and nonempty-directory refusal.
-- [ ] Run current benchmark, runner-option, SD/grid tests and new command tests. Run root/package `--check`, all-model benchmark dry run, and Enhancing-only dry run at 4 steps/CFG=0.
-- [ ] Commit: `refactor: package benchmark comparison and reporting workflows`.
+- [x] Test old and `python -m` commands with the same arguments; capture dispatch/settings without models. Test `--worker` in a fresh CPU-only subprocess, external cwd, root import patching, and package reload state.
+- [x] Test report schemas/whole-model stage grouping and exclusive ledger accounting through the new ownership. Assert source hashes cover the registry, model adapters, runtime, orchestration, reports, and notebooks rather than only facades.
+- [x] Run command tests and verify missing package command failures.
+- [x] Move timing to reporting and split report formatting from worker orchestration. Move comparisons into their package owner and retain the plain -> fuzzy-base -> full distinction and current grid labels/CLIP behavior.
+- [x] Launch workers as `python -m fuzzydiff.cli.benchmark --worker ...` with `cwd=repository_root()` and absolute config/output paths. Retain offline loading for measured workers and separate cache-preparation workers.
+- [x] Add reload handling for actual adapter/comparison modules, preserving existing `%run` defenses. Preserve the canonical notebook full-run entry cell, its filename convention, and RUN_OPTIONS forwarding.
+- [x] Replace root modules with compatible script/import facades. Update provenance paths using Task 1 helpers and maintain existing JSON field names, failures, and nonempty-directory refusal.
+- [x] Run current benchmark, runner-option, SD/grid tests and new command tests. Run root/package `--check`, all-model benchmark dry run, and Enhancing-only dry run at 4 steps/CFG=0.
+- [x] Commit: `refactor: package benchmark comparison and reporting workflows`.
 
 ## Task 6: Snow study and control workflows
 
@@ -145,12 +145,12 @@ assets remain outside this migration.
 
 **Interfaces produced:** Preserve `make_design`, `jobs_for`, `run_study`, `atomic_json`, `SnowBackend`, attention serialization, control-design/render/export helpers, and rating analysis through compatibility imports. Package CLI `main(argv=None)` functions preserve existing argument sets.
 
-- [ ] Test planning/artifact generation with no Torch/CUDA imports where the existing path permits it. Test actual package-file fingerprints, a changed implementation hash causing resume rejection, and unchanged artifact schema/path names.
-- [ ] Run package snow tests and verify missing interfaces/fingerprint failures.
-- [ ] Move existing implementation bodies and update imports/paths. Preserve guarded notebook cell indices and attention checkpoint payloads. Hash real source modules, never only root facades.
-- [ ] Preserve atomic writes, original failed-run upgrades, missing/bad-asset detection, procedural-renderer labeling, and resume checks. Do not convert old study manifests to new hashes.
-- [ ] Run all existing snow-study/control/artifact/GPU-adapter CPU tests plus package snow tests. Run original/package snow `--plan` paths; do not invoke a GPU generation phase.
-- [ ] Commit: `refactor: organize snow experiments and controls`.
+- [x] Test planning/artifact generation with no Torch/CUDA imports where the existing path permits it. Test actual package-file fingerprints, a changed implementation hash causing resume rejection, and unchanged artifact schema/path names.
+- [x] Run package snow tests and verify missing interfaces/fingerprint failures.
+- [x] Move existing implementation bodies and update imports/paths. Preserve guarded notebook cell indices and attention checkpoint payloads. Hash real source modules, never only root facades.
+- [x] Preserve atomic writes, original failed-run upgrades, missing/bad-asset detection, procedural-renderer labeling, and resume checks. Do not convert old study manifests to new hashes.
+- [x] Run all existing snow-study/control/artifact/GPU-adapter CPU tests plus package snow tests. Run original/package snow `--plan` paths; do not invoke a GPU generation phase.
+- [x] Commit: `refactor: organize snow experiments and controls`.
 
 ## Task 7: Final compatibility, configuration, and documentation
 
@@ -158,20 +158,20 @@ assets remain outside this migration.
 
 **Interfaces consumed:** All previous tasks; existing root commands remain supported.
 
-- [ ] Test clean-interpreter imports of package data/reporting/help with blocked Torch and checkpoint loaders. Assert all supported root helpers still import and legacy monkeypatches/reloads reach their package owners.
-- [ ] Verify old and new CLI flags, image names, model aliases, JSON fields, and single-display behavior against the specification. Assert canonical/archived notebook bytes equal the captured baseline hashes.
-- [ ] Run final compatibility tests and observe any remaining broken assumptions before fixing facades/docs. Fix actual implementation gaps rather than weakening tests or changing notebook algorithms.
-- [ ] Update README with real package layout, direct generation examples for six methods plus SD 1.5, benchmark/snow commands, and known baseline limitations. Update AGENTS path/loader ownership without removing scientific restrictions. Keep example configs CPU-valid and free of secrets/generated results.
-- [ ] If docs need tracking, narrow the existing broad ignore rule only for authored documentation; leave old attention/generated directories ignored. Do not stage user artifacts.
-- [ ] Run complete `unittest discover -s tests`, compile package and root Python files, root/package notebook checks, and dry-run commands. Inspect Git diff and notebook hashes. Scope results to CPU verification; no GPU/image-quality claims.
-- [ ] Append REVIEW with structural changes, verification results, and the requirement for fresh snow-study output directories. Commit: `docs: document structured repository and compatibility`.
+- [x] Test clean-interpreter imports of package data/reporting/help with blocked Torch and checkpoint loaders. Assert all supported root helpers still import and legacy monkeypatches/reloads reach their package owners.
+- [x] Verify old and new CLI flags, image names, model aliases, JSON fields, and single-display behavior against the specification. Assert canonical/archived notebook bytes equal the captured baseline hashes.
+- [x] Run final compatibility tests and observe any remaining broken assumptions before fixing facades/docs. Fix actual implementation gaps rather than weakening tests or changing notebook algorithms.
+- [x] Update README with real package layout, direct generation examples for six methods plus SD 1.5, benchmark/snow commands, and known baseline limitations. Update AGENTS path/loader ownership without removing scientific restrictions. Keep example configs CPU-valid and free of secrets/generated results.
+- [x] If docs need tracking, narrow the existing broad ignore rule only for authored documentation; leave old attention/generated directories ignored. Do not stage user artifacts.
+- [x] Run complete `unittest discover -s tests`, compile package and root Python files, root/package notebook checks, and dry-run commands. Inspect Git diff and notebook hashes. Scope results to CPU verification; no GPU/image-quality claims.
+- [x] Append REVIEW with structural changes, verification results, and the requirement for fresh snow-study output directories. Commit: `docs: document structured repository and compatibility`.
 
 ## Execution Preparation and Handoff
 
-- [ ] Obtain user review of this plan and their chosen execution approach.
-- [ ] Use `superpowers:using-git-worktrees` to create an isolated worktree for this refactor. Inspect cleanliness before branching; preserve user changes. Confirm the approved spec and plan are committed or otherwise available inside that worktree.
-- [ ] Record baseline notebook SHA256 values and run the baseline full CPU suite using the existing `.venv-cpu` interpreter. Use the same interpreter by absolute path from the isolated worktree rather than installing dependencies. Windows temporary-directory access may require the already established elevated-test approval.
-- [ ] Implement tasks in order; update checkboxes only after each verification passes. Keep code moves separate from necessary compatibility fixes in reviewable commits.
+- [x] Obtain user review of this plan and their chosen execution approach.
+- [x] Use `superpowers:using-git-worktrees` to create an isolated worktree for this refactor. Inspect cleanliness before branching; preserve user changes. Confirm the approved spec and plan are committed or otherwise available inside that worktree.
+- [x] Record baseline notebook SHA256 values and run the baseline full CPU suite using the existing `.venv-cpu` interpreter. Use the same interpreter by absolute path from the isolated worktree rather than installing dependencies. Windows temporary-directory access may require the already established elevated-test approval.
+- [x] Implement tasks in order; update checkboxes only after each verification passes. Keep code moves separate from necessary compatibility fixes in reviewable commits.
 - [ ] Complete the required whole-branch review, address findings, and report the actual file layout, new commands, legacy compatibility, checks performed, and GPU limitations.
 - [ ] Integrate the verified branch only through the user's chosen finishing workflow. Do not delete existing worktrees or discard user changes.
 

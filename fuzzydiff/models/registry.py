@@ -3,7 +3,6 @@
 The archived implementations are exploratory baselines, not validated reproductions.
 All adapters use CPU model offload and explicit common size/step/CFG settings.
 """
-import hashlib
 from pathlib import Path
 
 
@@ -100,10 +99,24 @@ def create_session(model: str, options: dict):
     session = cls.__new__(cls)
     try:
         cls.__init__(session, method, options)
-    except BaseException:
-        session.close()
+    except BaseException as error:
+        close_session(session, error)
         raise
     return session
+
+
+def close_session(session, primary_error=None) -> None:
+    try:
+        session.close()
+    except Exception as cleanup_error:
+        if primary_error is None:
+            raise
+        note = f'Additional cleanup failure: {cleanup_error}'
+        if hasattr(primary_error, 'add_note'):
+            primary_error.add_note(note)
+        else:
+            import warnings
+            warnings.warn(note, RuntimeWarning)
 
 
 def __getattr__(name):

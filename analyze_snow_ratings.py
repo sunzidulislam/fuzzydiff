@@ -1,5 +1,9 @@
 """Compatibility facade for fuzzydiff.experiments.snow.ratings."""
 if __name__ == '__main__':
+    import importlib
+    from fuzzydiff import compatibility
+    importlib.reload(compatibility)
+    compatibility.reload_workflow('snow')
     from fuzzydiff.cli.snow_ratings import main
     raise SystemExit(main())
 else:

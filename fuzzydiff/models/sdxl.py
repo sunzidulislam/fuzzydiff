@@ -66,8 +66,14 @@ class SDXLSession(ModelSession):
             pipeline=self.base)
         self.base.maybe_free_model_hooks()
         self.last_details['guidance_diagnostics'] = list(store.guidance_diagnostics)
-        return ns['refine_with_predicate'](
+        refined = ns['refine_with_predicate'](
             image, prompt, store, seed=seed, negative_prompt=o['negative'],
             refiner=self.refiner, strength=o['refine_strength'], num_steps=o['refine_steps'],
             guidance=o['guidance'], predicate_strength=o['predicate_strength'],
             membership_sharpness=o['sharpness'], membership_mode=o['membership_mode'])
+        self.last_details.update(
+            phrase_token_groups=getattr(store, 'token_groups', {}),
+            hedge_targets=getattr(store, 'hedge_targets', {}),
+            hedge_guidance_applied=bool(getattr(store, 'hedge_targets', {}) and store.guidance_diagnostics),
+            refinement_weights=getattr(store, 'refinement_weights', {}))
+        return refined

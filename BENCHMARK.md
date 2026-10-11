@@ -13,10 +13,10 @@ baseline. Timing a broken or inactive method is not a fair method comparison.
 
 ## Kaggle command
 
-Copy the three new Python files (`run_benchmark.py`, `benchmark_models.py`,
-`benchmark_timing.py`) into the repository on Kaggle. Keep `run_sd.py`, the
-canonical notebook, and the five analysis notebooks there, including
-`pipeline_fuzzy/analysis/enhancing-f3 (1).ipynb`.
+Copy/pull the complete checkout, including `fuzzydiff/`, root compatibility
+scripts, the canonical notebook, and the five archived analysis notebooks.
+The adapters now live in `fuzzydiff/models/`; timing/reporting live in
+`fuzzydiff/reporting/`, and workers use `python -m fuzzydiff.cli.benchmark`.
 Use the repository's existing requirements and a GPU with Internet enabled for
 the initial cache preparation. Run from the repository directory:
 
@@ -166,3 +166,12 @@ CPU tests validate accounting, definition loading, failure reporting and a real
 random-weight diffusion profiling path. They do not establish GPU performance,
 visual quality or correctness of the archived algorithms. No quality ranking is
 manufactured by this benchmark.
+
+## Package entry and JSON defaults
+
+The original `run_benchmark.py` flags and output schema remain available.
+`python -m fuzzydiff.cli.benchmark --config configs/benchmark_pilot.json --dry-run`
+validates a JSON pilot; explicit flags override JSON defaults. Use `--prepare-cache`
+for separate cache preparation before offline measured workers. Source hashes now
+cover actual package implementations and notebooks. For one image without timing,
+use `python -m fuzzydiff.cli.generate`; see README for every model identity.

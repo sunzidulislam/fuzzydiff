@@ -13,17 +13,19 @@ checkmarks.** Several claims in the paper abstract are not yet supported by evid
 ## The one structural rule
 
 **The notebook `pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb` is the single source of truth
-for all fuzzy logic.** Nothing reimplements it. Every runner loads definitions out of the
-notebook by matching the *first line* of each code cell:
+for all fuzzy logic.** Nothing reimplements it. Runners load definitions through
+explicit notebook policies; prefix-selected loaders match the first line of each cell:
 
-- `run_fullpipeline.py` execs every code cell (that is how SDXL runs at all).
-- `run_sd.py` execs only the backbone-independent cells, listed in `FUZZY_DEFINITIONS`.
-- `tests/test_fullpipeline.py` execs a wider set, listed in `prefixes` in `load_definitions`.
-- `snow_gpu.py` execs cells via `notebook_cells()`.
+- `fuzzydiff/cli/full_pipeline.py` executes every code cell for full SDXL runs.
+- `fuzzydiff/models/sd15.py` selects backbone-independent cells with `FUZZY_DEFINITIONS`.
+- `fuzzydiff/models/session.py` loads archived/canonical AST definitions for registered models.
+- `fuzzydiff/experiments/snow/gpu.py` uses the guarded cell-index policy.
+- `fuzzydiff/notebook_runtime.py` owns source reading/compilation and the explicit loading policies.
+- `tests/test_fullpipeline.py` retains its independent prefix-selected regression fixture.
 
 Consequence: **renaming the first definition in a cell silently drops it from those loaders.**
 If you rename or reorder a cell's leading `def`/`class`, update `FUZZY_DEFINITIONS` in
-`run_sd.py` and `prefixes` in `tests/test_fullpipeline.py` in the same change.
+`fuzzydiff/models/sd15.py` and `prefixes` in `tests/test_fullpipeline.py` in the same change.
 `tests/test_sd_fuzzy.py::test_notebook_supplies_the_fuzzy_definitions` is the tripwire.
 
 Do not copy fuzzy logic into a `.py` file "to make it easier". The two backbones must not
@@ -35,11 +37,13 @@ embeddings; SD 1.x does not).
 | Path | Role |
 |---|---|
 | `pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb` | Canonical implementation: config, membership, loss, attention collection, SDXL pipeline, refinement, entry cell |
-| `run_fullpipeline.py` | Executes the notebook's cells; dispatches `--check` / `--full` / `--compare` / `--four-way` |
-| `compare_fullpipeline.py` | Matched-seed SDXL diagnosis: native vs guidance-off vs guidance-on at each `--lr` |
-| `four_way.py` | `{SD 1.5, SDXL} × {no fuzzy, FuzzyDiff}` ablation grid plus CLIP metrics; `--refine` adds `sdxl_full`, the complete two-stage method |
-| `run_sd.py` | SD 1.x backbone, plain or fuzzy; also hosts `RELATION_VERBS`, `parse_relations` / `resolve_relations` and the `bound_to` shorthands |
-| `snow_*.py`, `run_snow_*.py` | Separate resumable snow-coverage study; see `SNOW_EXPERIMENT.md`, `SNOW_CONTROL.md` |
+| `fuzzydiff/models/` | Model registry, adapters, resource lifecycle; scientific definitions remain in notebooks |
+| `fuzzydiff/generation/` | One-image requests/results and explicit saving, no benchmark passes |
+| `fuzzydiff/experiments/` | Benchmarks, matched comparisons, and resumable snow workflows |
+| `fuzzydiff/reporting/` | Exclusive timing instrumentation and measured-data tables |
+| `fuzzydiff/cli/` | Argument parsing and package commands |
+| Root `run_*.py`, `benchmark_*.py`, `snow_*.py`, comparison files | Compatible script/import facades sharing their package owners' module state |
+| `configs/` | Validated JSON examples; explicit flags override defaults |
 | `REVIEW.md` | Running record of findings, including measured GPU results. **Read before changing the method.** |
 | `tests/` | CPU-only regression tests; no weight downloads |
 
@@ -47,7 +51,7 @@ embeddings; SD 1.x does not).
 
 ```bash
 python run_fullpipeline.py --check          # compile all 26 notebook code cells, no models
-python -m unittest discover -s tests        # 60 CPU tests, no downloads
+python -m unittest discover -s tests        # CPU tests, no downloads
 ```
 
 GPU work runs on Kaggle (T4, Internet on). Models load sequentially with CPU offload; a T4
@@ -67,10 +71,11 @@ Shared flags: `--prompt --words --seed --output --lr --sharpness --tnorm
 `sdxl_fuzzy`. Do not merge them: `sdxl_fuzzy` must differ from `sdxl_plain` by exactly one
 change, or the guidance ablation stops being readable. The chain is plain -> fuzzy -> full.
 
-**Kaggle gotcha:** `%run` reuses the kernel, so a module imported before a `git pull` is
-served stale from `sys.modules`. `run_fullpipeline.py` reloads `four_way` and `run_sd`, and
-`four_way` reloads `run_sd`, to defend against this. Keep those reloads when editing. A
-`TypeError` about argument counts right after a pull is always this.
+**Kaggle gotcha:** `%run` reuses the kernel. Root script entry points call
+`fuzzydiff.compatibility.reload_workflow` to refresh loaded package owners after
+a pull. Comparisons retain the explicit SD adapter reload. Imported legacy names
+alias the owning module, so patches and `importlib.reload` reach its live globals.
+Keep this behavior when editing; see README's reload example for direct Python usage.
 
 ## Method as implemented
 
@@ -84,8 +89,8 @@ served stale from `sys.modules`. `run_fullpipeline.py` reloads `four_way` and `r
   over several window sizes — normalized by the total so the comparison is scale free. Do
   not revert this to a mass sum: a duplicate instance raises the sum as much as a larger
   one, and a measured run produced two green apples instead of one bigger one; `bound_to` is a fuzzy AND of two memberships, each rescaled by
-  `relative_membership`. The verb list lives in `run_sd.RELATION_VERBS` and is mirrored in
-  `run_fullpipeline.RELATION_VERBS` to keep `--check` off the torch import path — a test
+  `relative_membership`. The verb list lives in `fuzzydiff.models.sd15.RELATION_VERBS` and is mirrored in
+  `fuzzydiff.cli.full_pipeline.RELATION_VERBS` to keep `--check` off the torch import path — a test
   asserts the two stay in step.
 - Guidance runs for the first `max_iter_to_alter` steps, updating the latent *before* noise
   prediction at the same timestep. Updates keep their raw gradient magnitude, capped at
@@ -126,9 +131,9 @@ These are measured findings, recorded in `REVIEW.md`. Contradicting them needs n
 2. **Hedge intensity is implemented only for comparatives.** `<hedge>_larger_than`
    targets a band on the extent gap, so `slightly` and `much` are distinct objectives.
    The targets (0.15 to 0.70) are chosen, not calibrated against human judgements, so do
-   not call them calibrated. For appearance attributes ("slightly dusty", "moderately
-   weathered") there is still no hedge operator at all: those remain the pretrained
-   model's interpretation.
+   not call them calibrated. The opt-in `--hedge-guidance` appearance objective targets attention truth only;
+   it does not measure rendered attribute intensity. Read `HEDGE_GUIDANCE.md` before
+   changing or interpreting this experimental mode.
 3. **No measured image-quality improvement exists.** On `"A slightly dusty red sports car
    parked on a road."`, seed 42, three configurations were tried and no arm separated;
    min-part CLIP got slightly *worse* with guidance in both backbones.
@@ -151,10 +156,11 @@ guidance, `red sports car` truth fell 0.3524 → 0.2377 while the attribute was 
 `bound_to` works around this inside the binding term via `relative_membership`, but the
 presence terms underneath still fight.
 
-Unimplemented candidate fix: a selectable membership mode — `share` (current) versus
+Approved experimental implementation: a selectable membership mode — `share` (current) versus
 `relative` (each phrase's attention normalised by its own spatial max), letting an attribute
 and its object both read high on the same pixels. This changes a core definition of the
-method; get the maintainer's agreement before building it.
+method; retain `share` as the default and get agreement before further method changes.
+No measured image-quality improvement is established for `relative`.
 
 ## Conventions
 

@@ -491,3 +491,34 @@ Validation: all 14 benchmark CPU tests pass, including read-only Enhancing impor
 CLI validation, Turbo sampling-setting forwarding and seeded generator forwarding.
 The enhancing pilot dry run and Python compilation pass. No pretrained checkpoints
 were downloaded and no GPU sampling or timing was performed locally.
+
+
+## 2026-10-12: repository package migration
+
+Moved Python implementation ownership into fuzzydiff/: notebook runtime/paths,
+registry and model sessions, ordinary generation, benchmark/comparison/snow
+experiments, timing/reporting, and CLI entry points. Root commands and import
+names remain facades sharing their package owners' module globals. Long-lived
+Kaggle root commands refresh loaded package owners; direct callers can use
+compatibility.reload_workflow. No fuzzy mathematics were moved out of the notebook.
+
+Added one-image generation for six existing adapters plus plain SD 1.5, explicit
+final-image save/display, JSON defaults with flag precedence, and error cleanup.
+The full FuzzyDiff adapter forwards supported relations/hedge options and records
+target/refinement diagnostics. Defaults retain existing benchmark/native settings;
+Turbo remains stock SDXL-Turbo (4/0), and SDXL base/refiner remains distinct from SPO.
+Unsupported baseline identities are not introduced.
+
+Workers use python -m with repository cwd and absolute config paths. Benchmark
+and snow hashes cover real implementation modules and the notebook runtime.
+Pre-refactor snow/control fingerprints remain incompatible; use fresh output
+directories rather than rewriting manifests. Artifact review remains available.
+
+Validation: 106 CPU regression tests passed, including SD 1.x and SDXL seeded
+random-weight pixels, legacy patch/reload behavior, clean subprocess workers,
+exclusive timings, generation/display/cleanup, and resume refusal. All 53 root
+and package Python files compile, all 26 canonical notebook code cells compile,
+all seven notebook SHA256 values match the baseline, and benchmark dry runs and
+snow/control plans pass. Existing dependency fixture warnings remain visible.
+No pretrained checkpoint downloads, GPU generations, image-quality measurements,
+or T4 performance claims were made during this migration.

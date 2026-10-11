@@ -21,9 +21,11 @@ from fuzzydiff.models.registry import LABELS, LIMITATIONS, NOTEBOOKS
 
 
 def parse_options(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--prompt', required=True)
-    parser.add_argument('--words', required=True, help='Tracked phrases appearing verbatim in prompt.')
+    parser.add_argument('--config', type=Path, help='JSON defaults; explicit flags override them.')
+    parser.add_argument('--prompt')
+    parser.add_argument('--words', help='Tracked phrases appearing verbatim in prompt.')
     parser.add_argument('--methods', default=','.join(NOTEBOOKS))
     parser.add_argument('--seeds', default='1024,999,42,142')
     parser.add_argument('--repeats', type=int, default=3)
@@ -44,8 +46,27 @@ def parse_options(argv=None):
     parser.add_argument('--output', default='/kaggle/working/outputs/prompt_benchmark')
     parser.add_argument('--prepare-cache', action='store_true', help='Populate model caches before measurement.')
     parser.add_argument('--dry-run', action='store_true', help='Validate and print plan; no imports of Torch or downloads.')
+    preliminary = argparse.ArgumentParser(add_help=False)
+    preliminary.add_argument('--config', type=Path)
+    known, _ = preliminary.parse_known_args(argv)
+    if known.config:
+        try:
+            defaults = json.loads(known.config.read_text(encoding='utf-8'))
+            allowed = {action.dest for action in parser._actions} - {'config', 'help'}
+            if not isinstance(defaults, dict) or set(defaults) - allowed:
+                raise ValueError('Unknown fields or non-object benchmark configuration.')
+            # JSON may use arrays for CSV command fields.
+            for name in ('words', 'methods', 'seeds'):
+                if isinstance(defaults.get(name), list):
+                    defaults[name] = ','.join(str(value) for value in defaults[name])
+            parser.set_defaults(**defaults)
+        except (OSError, ValueError, TypeError) as error:
+            parser.error(str(error))
     options = vars(parser.parse_args(argv))
+    options.pop('config', None)
     try:
+        if not options['prompt'] or not options['words']:
+            raise ValueError('--prompt and --words are required (flags or JSON).')
         options['words'] = [w.strip() for w in options['words'].split(',') if w.strip()]
         options['methods'] = [m.strip() for m in options['methods'].split(',') if m.strip()]
         options['seeds'] = [int(s.strip()) for s in options['seeds'].split(',')]

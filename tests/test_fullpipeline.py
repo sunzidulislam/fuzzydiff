@@ -508,6 +508,19 @@ class NotebookRegressionTests(unittest.TestCase):
             # initial sigma (~157) magnifies this into ~2e-4 latent error in this fixture.
             self.assertTrue(torch.allclose(baseline, native_output, atol=5e-4, rtol=1e-5),
                             f'Guidance-off/native max latent difference: {(baseline - native_output).abs().max().item()}')
+            # The extracted Turbo adapter must preserve the native pipeline's seeded pixels.
+            # Random SDXL weights exercise orchestration without a checkpoint download.
+            from fuzzydiff.models.sdxl_turbo import TurboSession
+            session = object.__new__(TurboSession)
+            session.method, session.ns = 'enhancing', {}
+            session.torch, session.device, session.base = torch, torch.device('cpu'), native
+            session.options = dict(prompt='a cat', words=[], size=64, steps=50,
+                                   guidance=7.5, negative='')
+            expected = native(prompt='a cat', negative_prompt='', height=64, width=64,
+                num_inference_steps=4, guidance_scale=0,
+                generator=torch.Generator().manual_seed(9)).images[0]
+            actual = session.generate(9)
+            self.assertEqual(actual.tobytes(), expected.tobytes())
             guided, store = sample(1)
             repeated, _ = sample(1)
             self.assertTrue(torch.isfinite(guided).all())

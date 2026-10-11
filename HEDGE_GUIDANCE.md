@@ -71,3 +71,16 @@ meaning, and whether hedge guidance ran. Full-pipeline output also records signe
 refinement weights. Compare runs with and without the flag using identical prompts,
 seeds and settings, in separate output directories. Previously generated images
 were not produced with this new objective.
+
+## Direct final-image interface
+
+The package generation command also supports the experimental option:
+
+```bash
+python -m fuzzydiff.cli.generate --model fuzzydiff_full --prompt "A mostly blue ceramic vase on a table." --words "mostly blue,ceramic vase,table" --bind "mostly blue>ceramic vase" --hedge-guidance --seed 142 --output outputs/vase_hedge
+```
+
+It uses the same notebook objective and signed refinement masks, without benchmark
+warmups or profiling. Its final image is `seed_142.png`; the legacy full command
+keeps stage-one and stage-two filenames. The benchmark CLI remains unchanged in
+its scientific options and does not expose generic hedge guidance.
