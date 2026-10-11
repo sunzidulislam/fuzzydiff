@@ -1,6 +1,6 @@
 # FuzzyDiff repository restructuring design
 
-Status: architecture approved in conversation; written specification awaiting review.
+Status: architecture and written specification approved in conversation on 2026-10-12.
 Baseline: `6f23ae4`, inspected on 2026-10-12.
 
 ## Purpose and success criteria
