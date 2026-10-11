@@ -1,6 +1,6 @@
 # Prompt-based whole-model benchmark
 
-`run_benchmark.py` runs the four archived analysis implementations and full
+`run_benchmark.py` runs the five archived analysis implementations and full
 FuzzyDiff in isolated, sequential GPU processes. It reads notebook definitions;
 it does not edit notebooks or execute their saved batch cells. The main table has
 one row per method. Base generation and refinement are combined.
@@ -15,7 +15,8 @@ baseline. Timing a broken or inactive method is not a fair method comparison.
 
 Copy the three new Python files (`run_benchmark.py`, `benchmark_models.py`,
 `benchmark_timing.py`) into the repository on Kaggle. Keep `run_sd.py`, the
-canonical notebook, and the four `pipeline_fuzzy/analysis/*.ipynb` files there.
+canonical notebook, and the five analysis notebooks there, including
+`pipeline_fuzzy/analysis/enhancing-f3 (1).ipynb`.
 Use the repository's existing requirements and a GPU with Internet enabled for
 the initial cache preparation. Run from the repository directory:
 
@@ -49,10 +50,28 @@ Preparation duration is recorded separately and is not included in model-load
 time. If everything is already cached, omit `--prepare-cache`. A missing cache
 then produces an explicit load failure rather than silently downloading weights.
 
-Five methods, four seeds, three repetitions and one warmup means 60 saved images
-and 125 complete inference invocations: 60 ordinary passes, 60 profiling passes,
-and five warmups. Repetitions with the same seed are timing replicates, not
+Six methods, four seeds, three repetitions and one warmup means 72 saved images
+and 150 complete inference invocations: 72 ordinary passes, 72 profiling passes,
+and six warmups. Repetitions with the same seed are timing replicates, not
 additional independent quality samples. Two-stage invocations include both stages.
+
+The `enhancing` method is the archived SDXL-Turbo notebook, with no refiner or
+fuzzy objective. It always uses its native 4 steps and CFG=0; these effective
+settings are recorded in metadata. Its timing is not a comparison at matched
+step counts. Optional xFormers is omitted; standard attention and VAE slicing/
+tiling are used. Run its pilot separately with:
+
+```python
+subprocess.run([
+    sys.executable, "run_benchmark.py",
+    "--prompt", "A red ball beside a blue ball.",
+    "--words", "red ball,blue ball", "--methods", "enhancing",
+    "--seeds", "142", "--repeats", "1",
+    "--steps", "4", "--size", "512", "--guidance", "0",
+    "--prepare-cache",
+    "--output", "/kaggle/working/outputs/enhancing_pilot",
+], check=True)
+```
 
 ## Outputs
 

@@ -20,12 +20,14 @@ NOTEBOOKS = {
     'attend': ROOT / 'pipeline_fuzzy/analysis/attend-f3.ipynb',
     'predicate': ROOT / 'pipeline_fuzzy/analysis/predicate-f3.ipynb',
     'aesthetic': ROOT / 'pipeline_fuzzy/analysis/aesthetic-f3.ipynb',
+    'enhancing': ROOT / 'pipeline_fuzzy/analysis/enhancing-f3 (1).ipynb',
     'fuzzydiff': ROOT / 'pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb',
 }
 LABELS = {'stable': 'SD 1.4 plain (archived)',
           'attend': 'Attend-and-Excite (archived, unvalidated)',
           'predicate': 'Predicated Diffusion (archived, unvalidated)',
-          'aesthetic': 'SDXL base + refiner', 'fuzzydiff': 'FuzzyDiff full'}
+          'aesthetic': 'SDXL base + refiner', 'enhancing': 'SDXL-Turbo (Enhancing notebook)',
+          'fuzzydiff': 'FuzzyDiff full'}
 LIMITATIONS = {
     'stable': ['This notebook uses SD 1.4, not the SD 1.5 CLI backbone.'],
     'attend': ['Archived attention storage detaches tensors; gradient guidance is disconnected. '
@@ -38,7 +40,19 @@ LIMITATIONS = {
     'aesthetic': ['This is SDXL base + refiner, not an aesthetic-guidance objective.',
                   'The archived refiner receives no negative prompt.'],
     'fuzzydiff': ['Attention truth is not a visual accuracy measurement.'],
+    'enhancing': ['This notebook uses SDXL-Turbo with no fuzzy objective or refinement.',
+                  'Uses its native 4-step, CFG=0 settings rather than common steps/CFG; '
+                  'timings are not a matched-step comparison.',
+                  'Tracked phrases are metadata only; CFG=0 ignores negative conditioning.',
+                  'Uses standard attention with VAE slicing/tiling; optional xFormers is not enabled.'],
 }
+
+
+def effective_sampling_settings(method, options):
+    """Turbo retains the notebook's native distilled sampling configuration."""
+    return {'steps': 4 if method == 'enhancing' else options['steps'],
+            'guidance': 0.0 if method == 'enhancing' else options['guidance'],
+            'size': options['size']}
 
 
 def component_commit_hash(component):
@@ -88,7 +102,7 @@ class NotebookModel:
     def __init__(self, method, options):
         import torch
         from diffusers import (AutoencoderKL, DiffusionPipeline, StableDiffusionPipeline,
-                               DPMSolverMultistepScheduler, DDIMScheduler)
+                               StableDiffusionXLPipeline, DPMSolverMultistepScheduler, DDIMScheduler)
         self.torch = torch
         self.method, self.options = method, options
         self.device = torch.device('cuda:0')
@@ -137,6 +151,17 @@ class NotebookModel:
             self.load_parts['configuration'] = perf_counter() - start
             self.pipelines = [self.base]
             self.checkpoints = [checkpoint]
+        elif method == 'enhancing':
+            self.base = load('base', lambda: place(StableDiffusionXLPipeline.from_pretrained(
+                'stabilityai/sdxl-turbo', torch_dtype=torch.float16,
+                variant='fp16', **common)))
+            start = perf_counter()
+            self.base.enable_vae_slicing()
+            self.base.enable_vae_tiling()
+            torch.cuda.synchronize()
+            self.load_parts['configuration'] = perf_counter() - start
+            self.pipelines = [self.base]
+            self.checkpoints = ['stabilityai/sdxl-turbo']
         else:
             vae = load('vae', lambda: AutoencoderKL.from_pretrained(
                 'madebyollin/sdxl-vae-fp16-fix', torch_dtype=torch.float16, **common))
@@ -181,6 +206,7 @@ class NotebookModel:
 
     def metadata(self):
         return {'checkpoints': self.checkpoints,
+                'effective_sampling_settings': effective_sampling_settings(self.method, self.options),
                 'dtype': str(self.base.unet.dtype),
                 'schedulers': [type(p.scheduler).__name__ for p in self.pipelines],
                 'placement': 'model_cpu_offload, cuda:0',
@@ -192,7 +218,8 @@ class NotebookModel:
                     for i, p in enumerate(self.pipelines)
                     for name in ('unet', 'vae', 'text_encoder', 'text_encoder_2')},
                 'adapter_notes': [
-                    'Common explicit size, steps and CFG; CPU model offload on every method.',
+                    'Common explicit size, steps and CFG except native SDXL-Turbo 4 steps/CFG=0; '
+                    'CPU model offload on every method.',
                     'No CLIP evaluation, display or image saving inside inference.',
                     'SDXL refiner has its own VAE to avoid shared offload hooks.',
                     'SD 1.5 uses the maintained stable-diffusion-v1-5 checkpoint repository.',
@@ -238,17 +265,19 @@ class NotebookModel:
         phase = ledger.measure if ledger else lambda name: nullcontext()
         with phase('preprocess'):
             prompt, words = o['prompt'], o['words']
+            sampling = effective_sampling_settings(self.method, o)
             generator = torch.Generator(device=self.device).manual_seed(seed)
             common = dict(prompt=prompt, height=o['size'], width=o['size'],
-                          num_inference_steps=o['steps'], guidance_scale=o['guidance'],
+                          num_inference_steps=sampling['steps'], guidance_scale=sampling['guidance'],
                           generator=generator)
             groups, indices = {}, []
             if self.method in ('attend', 'predicate'):
                 # Use the canonical phrase tokenizer, not hard-coded prompt indices.
                 groups = self.token_groups(self.base.tokenizer, prompt, words)
                 indices = sorted({group[-1] for group in groups.values()})
-            self.last_details = {'phrase_token_groups': groups, 'target_indices': indices}
-        if self.method == 'stable':
+            self.last_details = {'phrase_token_groups': groups, 'target_indices': indices,
+                                 'effective_sampling_settings': sampling}
+        if self.method in ('stable', 'enhancing'):
             return self.base(**common, negative_prompt=o['negative']).images[0]
         if self.method == 'attend':
             with phase('preprocess'):

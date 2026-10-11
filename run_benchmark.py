@@ -1,4 +1,4 @@
-"""Benchmark four archived notebook implementations and full FuzzyDiff on one prompt.
+"""Benchmark archived notebook implementations and full FuzzyDiff on one prompt.
 
 No notebook is modified. Use --dry-run before GPU execution. --prepare-cache performs
 downloads in separate processes before offline, cached-loading measurements.
@@ -74,7 +74,7 @@ def parse_options(argv=None):
         if not 0 < options['refine_strength'] <= 1 or int(
                 options['refine_steps'] * options['refine_strength']) < 1:
             raise ValueError('Refinement must produce at least one denoising step.')
-        if options['guidance'] <= 1:
+        if options['guidance'] <= 1 and any(m != 'enhancing' for m in options['methods']):
             raise ValueError('Archived predicate implementation requires CFG > 1.')
         options['bindings'] = []
         for binding in options.pop('bind'):
@@ -151,7 +151,9 @@ def save_reports(directory, records, metadata):
              'Loading is one offline cached-checkpoint measurement per method. '
              'Preprocess/tokenize/encode/generate are exclusive components from a separate profiled pass. '
              'Their sum is profiled time, NOT the uninstrumented total. '
-             'Generation includes both base and refinement where applicable.', '',
+             'Generation includes both base and refinement where applicable. '
+             'Enhancing uses native SDXL-Turbo settings (4 steps, CFG=0); '
+             'its speed is not a matched-step comparison.', '',
              '| Method | Load s | Prep ms* | Token ms* | Encode ms* | Generate s* | Whole inference s, mean ± SD | Median s | Peak allocated / reserved GiB | Inference OK / failed | Profiles OK |',
              '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |']
 

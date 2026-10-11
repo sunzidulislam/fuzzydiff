@@ -474,3 +474,20 @@ All 26 notebook cells compile; modified Python runners compile. Windows sandbox
 temporary-directory errors required rerunning tests outside the sandbox. No
 pretrained models were downloaded, no GPU images were generated, and no visual
 quality improvement or target coverage accuracy has been measured.
+
+
+## 2026-10-11: Enhancing notebook benchmark adapter
+
+The previously omitted enhancing-f3 (1).ipynb is a stock SDXL-Turbo sampler,
+not a separate enhancement objective. Added enhancing to the read-only benchmark
+catalog without editing the archived notebook. It loads stabilityai/sdxl-turbo
+FP16 with CPU offload and VAE slicing/tiling, no refiner and no optional xFormers.
+Its native four steps and CFG=0 are retained, even in a multi-method benchmark;
+effective settings are recorded and reports explicitly flag unmatched step counts.
+Single-method enhancing runs accept --guidance 0. Tracked phrases are metadata,
+not constraints, and negative conditioning has no CFG effect.
+
+Validation: all 14 benchmark CPU tests pass, including read-only Enhancing import,
+CLI validation, Turbo sampling-setting forwarding and seeded generator forwarding.
+The enhancing pilot dry run and Python compilation pass. No pretrained checkpoints
+were downloaded and no GPU sampling or timing was performed locally.

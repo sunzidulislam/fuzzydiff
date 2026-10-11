@@ -13,6 +13,41 @@ from pathlib import Path
 
 
 class BenchmarkTests(unittest.TestCase):
+    def test_enhancing_is_turbo_and_uses_native_sampling_settings(self):
+        models = self.module('benchmark_models')
+        runner = self.module('run_benchmark')
+        self.assertEqual(models.NOTEBOOKS['enhancing'].name, 'enhancing-f3 (1).ipynb')
+        options = runner.parse_options(['--prompt', 'red ball beside blue ball',
+            '--words', 'red ball,blue ball', '--methods', 'enhancing',
+            '--steps', '4', '--guidance', '0', '--dry-run'])
+        self.assertEqual(options['methods'], ['enhancing'])
+        self.assertEqual(models.effective_sampling_settings('enhancing', options),
+                         {'steps': 4, 'guidance': 0.0, 'size': 512})
+        standard = {**options, 'steps': 50, 'guidance': 7.5}
+        self.assertEqual(models.effective_sampling_settings('enhancing', standard)['steps'], 4)
+        self.assertEqual(models.effective_sampling_settings('enhancing', standard)['guidance'], 0)
+        self.assertEqual(models.effective_sampling_settings('stable', standard)['steps'], 50)
+
+    def test_enhancing_generation_forwards_native_settings_without_refinement(self):
+        import torch
+        models = self.module('benchmark_models')
+        model = models.NotebookModel.__new__(models.NotebookModel)
+        model.method = 'enhancing'
+        model.options = {'prompt': 'red ball', 'words': ['red ball'], 'size': 512,
+                         'steps': 50, 'guidance': 7.5, 'negative': ''}
+        model.ns, model.torch, model.device = {}, torch, torch.device('cpu')
+        captured = {}
+        sentinel = object()
+        def base(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(images=[sentinel])
+        model.base = base
+        self.assertIs(model.generate(142), sentinel)
+        self.assertEqual(captured['num_inference_steps'], 4)
+        self.assertEqual(captured['guidance_scale'], 0)
+        self.assertEqual(captured['height'], 512)
+        self.assertEqual(captured['generator'].initial_seed(), 142)
+
     def module(self, name):
         self.assertIsNotNone(importlib.util.find_spec(name), f'{name} is not implemented')
         return __import__(name)
@@ -137,7 +172,7 @@ class BenchmarkTests(unittest.TestCase):
         model.load_s = 3.5
         model.load_parts = {'base': 3.5}
         model.definition_setup_s = 0.1
-        model.options = {}
+        model.options = {'steps': 50, 'guidance': 7.5, 'size': 512}
         metadata = model.metadata()
         self.assertEqual(metadata['component_commit_hashes']['0.text_encoder'], 'revision-a')
 
@@ -145,6 +180,7 @@ class BenchmarkTests(unittest.TestCase):
         models = self.module('benchmark_models')
         expected = {'stable': 'generate', 'attend': 'AttendAndExcitePipeline',
                     'predicate': 'PredicatedDiffPipeline', 'aesthetic': 'generate_image_return',
+                    'enhancing': 'StableDiffusionXLPipeline',
                     'fuzzydiff': 'FuzzyAttendExciteSDXLPipeline'}
         for method, symbol in expected.items():
             with self.subTest(method=method):
