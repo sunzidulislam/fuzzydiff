@@ -69,7 +69,7 @@ class GenerationRequest:
             if not isinstance(pair, (list, tuple)) or len(pair) != 2 or any(w not in self.words for w in pair):
                 raise ValueError('Binding operands must be tracked phrases.')
         # The CLI mirror is data-only; parsing does not import Torch.
-        from run_fullpipeline import RELATION_VERBS
+        from fuzzydiff.cli.full_pipeline import RELATION_VERBS
         for relation in o.get('relations', ()):
             if len(relation) != 3 or relation[1] not in RELATION_VERBS or any(w not in self.words for w in (relation[0], relation[2])):
                 raise ValueError('Relation must use a supported verb and tracked operands.')

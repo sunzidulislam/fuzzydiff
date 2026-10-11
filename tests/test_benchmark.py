@@ -236,7 +236,7 @@ class BenchmarkTests(unittest.TestCase):
             output = Path(folder) / 'results'
             environment = dict(os.environ, CUDA_VISIBLE_DEVICES='', PYTHONIOENCODING='utf-8')
             result = subprocess.run([
-                sys.executable, str(Path(runner.__file__)), '--prompt', 'a ball',
+                sys.executable, str(Path(__file__).resolve().parents[1] / 'run_benchmark.py'), '--prompt', 'a ball',
                 '--words', 'ball', '--methods', 'stable', '--seeds', '42',
                 '--repeats', '1', '--output', str(output)],
                 env=environment, capture_output=True, text=True, encoding='utf-8')

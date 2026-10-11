@@ -85,7 +85,7 @@ class ModelSession:
 
     @contextmanager
     def profile_preprocessing(self, ledger):
-        from benchmark_timing import patch_method
+        from fuzzydiff.reporting.timing import patch_method
 
         def timed(original):
             @wraps(original)

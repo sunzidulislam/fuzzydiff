@@ -23,7 +23,7 @@ import json
 from pathlib import Path
 
 DEFAULT_MODEL = 'stable-diffusion-v1-5/stable-diffusion-v1-5'
-from run_fullpipeline import RELATION_VERBS
+from fuzzydiff.cli.full_pipeline import RELATION_VERBS
 
 
 def main(argv=None):

@@ -1,0 +1,1 @@
+"""FuzzyDiff reporting interfaces."""
