@@ -172,7 +172,7 @@ assets remain outside this migration.
 - [x] Use `superpowers:using-git-worktrees` to create an isolated worktree for this refactor. Inspect cleanliness before branching; preserve user changes. Confirm the approved spec and plan are committed or otherwise available inside that worktree.
 - [x] Record baseline notebook SHA256 values and run the baseline full CPU suite using the existing `.venv-cpu` interpreter. Use the same interpreter by absolute path from the isolated worktree rather than installing dependencies. Windows temporary-directory access may require the already established elevated-test approval.
 - [x] Implement tasks in order; update checkboxes only after each verification passes. Keep code moves separate from necessary compatibility fixes in reviewable commits.
-- [ ] Complete the required whole-branch review, address findings, and report the actual file layout, new commands, legacy compatibility, checks performed, and GPU limitations.
+- [x] Complete the required whole-branch review, address findings, and report the actual file layout, new commands, legacy compatibility, checks performed, and GPU limitations.
 - [ ] Integrate the verified branch only through the user's chosen finishing workflow. Do not delete existing worktrees or discard user changes.
 
 ## Plan Self-Review

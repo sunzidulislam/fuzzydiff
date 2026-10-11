@@ -50,7 +50,19 @@ def effective_sampling_settings(method, options):
 
 
 from dataclasses import dataclass
-from fuzzydiff.notebook_runtime import definition_code, load_definitions
+from fuzzydiff import notebook_runtime
+from fuzzydiff.notebook_runtime import definition_code
+
+
+def load_definitions(path):
+    return notebook_runtime.load_definitions(path, compiler=definition_code)
+
+
+def component_commit_hash(component):
+    config = getattr(component, 'config', None)
+    if isinstance(config, dict):
+        return config.get('_commit_hash')
+    return getattr(config, '_commit_hash', None)
 
 
 @dataclass(frozen=True)
@@ -124,7 +136,4 @@ def __getattr__(name):
     if name == 'NotebookModel':
         from .session import NotebookModel
         return NotebookModel
-    if name == 'component_commit_hash':
-        from .session import component_commit_hash
-        return component_commit_hash
     raise AttributeError(name)

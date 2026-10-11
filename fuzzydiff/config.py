@@ -14,6 +14,11 @@ def load_request_config(path: Path) -> dict:
 
 
 def merge_request_config(config: dict, explicit_flags: dict) -> GenerationRequest:
+    for mapping in (config, explicit_flags):
+        if not isinstance(mapping, dict):
+            raise ValueError('Generation configuration must be an object.')
+        if not isinstance(mapping.get('method_options', {}), dict):
+            raise ValueError('method_options must be a JSON object.')
     allowed = {f.name for f in fields(GenerationRequest)}
     unknown = (set(config) | set(explicit_flags)) - allowed
     if unknown:

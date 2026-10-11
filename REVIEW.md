@@ -522,3 +522,21 @@ all seven notebook SHA256 values match the baseline, and benchmark dry runs and
 snow/control plans pass. Existing dependency fixture warnings remain visible.
 No pretrained checkpoint downloads, GPU generations, image-quality measurements,
 or T4 performance claims were made during this migration.
+
+## 2026-10-12: repository review fixes
+
+The independent whole-branch review identified namespace lifetime, legacy helper
+patch ownership, and benchmark JSON validation defects. Registered notebook
+namespaces now have unique identities and are explicitly unregistered and cleared
+on close or failed loading. Model sessions resolve shared helpers through the
+live registry owner, including legacy definition compiler and sampling patches.
+Benchmark JSON defaults now receive type and choice validation before workers
+start. Non-object generation method_options now produces a configuration error.
+
+Each finding was reproduced with a failing CPU regression before its fix, then
+passed in isolation. The complete review-fixed tree passed 111 CPU tests in
+31.243 seconds. All 53 root/package Python files and 26 canonical code cells
+compile; all seven notebook hashes remain unchanged. This verifies structural
+and CPU compatibility only; no GPU results or image-quality improvements were
+measured. Review decisions are recorded in
+docs/superpowers/reviews/2026-10-12-repository-structure.md.

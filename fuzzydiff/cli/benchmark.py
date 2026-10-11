@@ -59,6 +59,29 @@ def parse_options(argv=None):
             for name in ('words', 'methods', 'seeds'):
                 if isinstance(defaults.get(name), list):
                     defaults[name] = ','.join(str(value) for value in defaults[name])
+            # argparse validates CLI tokens, but set_defaults bypasses types/choices
+            # for JSON values. Apply the same contract before any worker can launch.
+            actions = {action.dest: action for action in parser._actions}
+            for name, value in defaults.items():
+                action = actions[name]
+                if isinstance(action, argparse._StoreTrueAction):
+                    if type(value) is not bool:
+                        raise ValueError(f'{name} must be a JSON boolean.')
+                elif isinstance(action, argparse._AppendAction):
+                    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                        raise ValueError(f'{name} must be an array of strings.')
+                elif action.type is int:
+                    if type(value) not in (int, str):
+                        raise ValueError(f'{name} must be an integer.')
+                    defaults[name] = int(value)
+                elif action.type is float:
+                    if type(value) not in (int, float, str):
+                        raise ValueError(f'{name} must be numeric.')
+                    defaults[name] = float(value)
+                elif not isinstance(value, str):
+                    raise ValueError(f'{name} must be text.')
+                if action.choices is not None and defaults[name] not in action.choices:
+                    raise ValueError(f'Invalid {name}; choose from {", ".join(action.choices)}.')
             parser.set_defaults(**defaults)
         except (OSError, ValueError, TypeError) as error:
             parser.error(str(error))

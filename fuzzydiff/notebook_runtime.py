@@ -4,11 +4,14 @@ import hashlib
 import json
 import sys
 import types
+from itertools import count
 from pathlib import Path
 from types import CodeType
 from typing import Iterable
 
 from .paths import repository_root
+
+_NAMESPACE_IDS = count()
 
 
 def notebook_cells(path: Path) -> list[tuple[int, str]]:
@@ -59,13 +62,26 @@ def definition_code(path: Path) -> CodeType:
                    str(path), 'exec')
 
 
-def load_definitions(path: Path) -> dict:
+def load_definitions(path: Path, compiler=None) -> dict:
     # Dataclasses resolves annotations through the defining module.
-    name = '_benchmark_' + hashlib.sha256(str(path).encode()).hexdigest()[:12]
+    name = '_benchmark_' + hashlib.sha256(str(path).encode()).hexdigest()[:12] + f'_{next(_NAMESPACE_IDS)}'
     module = types.ModuleType(name)
     sys.modules[name] = module
-    exec(definition_code(path), module.__dict__)
+    try:
+        exec((compiler or definition_code)(path), module.__dict__)
+    except BaseException:
+        release_definitions(module.__dict__)
+        raise
     return module.__dict__
+
+
+def release_definitions(namespace: dict) -> None:
+    name = namespace.get('__name__', '')
+    module = sys.modules.get(name)
+    # Another owner may have registered the same name; release only this namespace.
+    if name.startswith('_benchmark_') and module is not None and module.__dict__ is namespace:
+        del sys.modules[name]
+    namespace.clear()
 
 
 def source_hashes(paths: Iterable[Path]) -> dict[str, str]:

@@ -5,15 +5,8 @@ from functools import wraps
 from pathlib import Path
 from time import perf_counter
 
-from .registry import NOTEBOOKS, LIMITATIONS, effective_sampling_settings, adapter_class, create_session, close_session
-from fuzzydiff.notebook_runtime import load_definitions
-
-
-def component_commit_hash(component):
-    config = getattr(component, 'config', None)
-    if isinstance(config, dict):
-        return config.get('_commit_hash')
-    return getattr(config, '_commit_hash', None)
+from . import registry
+from fuzzydiff.notebook_runtime import release_definitions
 
 
 class ModelSession:
@@ -26,7 +19,7 @@ class ModelSession:
         self.load_parts = {}
         self.last_details = {}
         start = perf_counter()
-        self.ns = load_definitions(NOTEBOOKS[method])
+        self.ns = registry.load_definitions(registry.NOTEBOOKS[method])
         if method in ('attend', 'predicate'):
             from .sd15 import load_fuzzy_definitions
             self.token_groups = load_fuzzy_definitions()['get_token_groups']
@@ -57,15 +50,15 @@ class ModelSession:
 
     def metadata(self):
         return {'checkpoints': self.checkpoints,
-                'effective_sampling_settings': effective_sampling_settings(self.method, self.options),
+                'effective_sampling_settings': registry.effective_sampling_settings(self.method, self.options),
                 'dtype': str(self.base.unet.dtype),
                 'schedulers': [type(p.scheduler).__name__ for p in self.pipelines],
                 'placement': 'model_cpu_offload, cuda:0',
                 'load_s': self.load_s, 'load_parts_s': self.load_parts,
                 'definition_setup_s': self.definition_setup_s,
-                'notebook_sha256': hashlib.sha256(NOTEBOOKS[self.method].read_bytes()).hexdigest(),
+                'notebook_sha256': hashlib.sha256(registry.NOTEBOOKS[self.method].read_bytes()).hexdigest(),
                 'component_commit_hashes': {
-                    f'{i}.{name}': component_commit_hash(getattr(p, name, None))
+                    f'{i}.{name}': registry.component_commit_hash(getattr(p, name, None))
                     for i, p in enumerate(self.pipelines)
                     for name in ('unet', 'vae', 'text_encoder', 'text_encoder_2')},
                 'adapter_notes': [
@@ -75,7 +68,7 @@ class ModelSession:
                     'SDXL refiner has its own VAE to avoid shared offload hooks.',
                     'SD 1.5 uses the maintained stable-diffusion-v1-5 checkpoint repository.',
                     'Core archived algorithms are not repaired by this runner.'],
-                'limitations': LIMITATIONS[self.method]}
+                'limitations': registry.LIMITATIONS[self.method]}
 
     def reset(self):
         # Run outside the timer: each sample starts with the same processor setup.
@@ -116,7 +109,7 @@ class ModelSession:
         phase = ledger.measure if ledger else lambda name: nullcontext()
         with phase('preprocess'):
             prompt, words = o['prompt'], o['words']
-            sampling = effective_sampling_settings(self.method, o)
+            sampling = registry.effective_sampling_settings(self.method, o)
             generator = torch.Generator(device=self.device).manual_seed(seed)
             common = dict(prompt=prompt, height=o['size'], width=o['size'],
                           num_inference_steps=sampling['steps'], guidance_scale=sampling['guidance'],
@@ -134,7 +127,7 @@ class ModelSession:
         return self
 
     def __exit__(self, exc_type, exc, traceback):
-        close_session(self, exc)
+        registry.close_session(self, exc)
 
     def close(self):
         pipelines = getattr(self, 'pipelines', [])
@@ -154,6 +147,7 @@ class ModelSession:
         finally:
             self.pipelines = []
             self.base = self.refiner = None
+            release_definitions(getattr(self, 'ns', {}))
             self.ns = {}
             self.original_processors = []
         if errors:
@@ -163,8 +157,8 @@ class ModelSession:
 class NotebookModel(ModelSession):
     """Legacy construction delegates to the same sessions as direct generation."""
     def __init__(self, method, options):
-        session = create_session(method, options)
+        session = registry.create_session(method, options)
         self.__dict__.update(session.__dict__)
 
     def _generate(self, *args):
-        return adapter_class(self.method)._generate(self, *args)
+        return registry.adapter_class(self.method)._generate(self, *args)
