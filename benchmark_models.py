@@ -14,7 +14,9 @@ from pathlib import Path
 from time import perf_counter
 
 
-ROOT = Path(__file__).resolve().parent
+from fuzzydiff.paths import repository_root
+
+ROOT = repository_root()
 NOTEBOOKS = {
     'stable': ROOT / 'pipeline_fuzzy/analysis/stable-f3.ipynb',
     'attend': ROOT / 'pipeline_fuzzy/analysis/attend-f3.ipynb',
@@ -62,40 +64,7 @@ def component_commit_hash(component):
     return getattr(config, '_commit_hash', None)
 
 
-def definition_code(path):
-    """Select definitions/imports, never notebook model loads, batches or shell cells."""
-    notebook = json.loads(Path(path).read_text(encoding='utf-8'))
-    body = []
-    for cell in notebook['cells']:
-        if cell['cell_type'] != 'code':
-            continue
-        source = ''.join(cell['source'])
-        source = '\n'.join(line for line in source.splitlines()
-                           if not line.lstrip().startswith(('!', '%')))
-        for node in ast.parse(source).body:
-            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
-                body.append(node)
-            elif isinstance(node, (ast.Import, ast.ImportFrom)):
-                roots = ([name.name.split('.')[0] for name in node.names]
-                         if isinstance(node, ast.Import) else [node.module.split('.')[0]])
-                # Only used by notebook display, evaluation or unused helpers.
-                if not set(roots) & {'clip', 'cv2', 'IPython', 'pandas'}:
-                    body.append(node)
-            elif isinstance(node, ast.Assign) and all(
-                    isinstance(target, ast.Name) and target.id in
-                    {'HEDGE_TARGETS', 'RELATION_VERBS'} for target in node.targets):
-                body.append(node)
-    return compile(ast.fix_missing_locations(ast.Module(body=body, type_ignores=[])),
-                   str(path), 'exec')
-
-
-def load_definitions(path):
-    # dataclasses resolves annotations through the defining module.
-    name = '_benchmark_' + hashlib.sha256(str(path).encode()).hexdigest()[:12]
-    module = types.ModuleType(name)
-    sys.modules[name] = module
-    exec(definition_code(path), module.__dict__)
-    return module.__dict__
+from fuzzydiff.notebook_runtime import definition_code, load_definitions
 
 
 class NotebookModel:

@@ -4,6 +4,9 @@ import importlib
 import json
 from pathlib import Path
 
+from fuzzydiff.paths import canonical_notebook
+from fuzzydiff.notebook_runtime import compile_notebook
+
 # Shared by --full, --compare and --four-way so the three paths agree; mirrored in
 # compare_fullpipeline.NEGATIVE, which a test asserts stays in step.
 DEFAULT_NEGATIVE = ('cartoon, anime, illustration, painting, drawing, sketch, 3d render, cgi, '
@@ -86,7 +89,7 @@ def main():
             relations.append((subject, verb, obj))
     except ValueError as error:
         parser.error(str(error))
-    path = Path(__file__).parent / 'pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb'
+    path = canonical_notebook()
     notebook = json.loads(path.read_text(encoding='utf-8'))
     namespace = {'__name__': '__main__', 'FULL_RUN': options.full,
                  'RUN_OPTIONS': dict(prompt=options.prompt, words=words, seed=options.seed,
@@ -98,15 +101,7 @@ def main():
                                      predicate_strength=options.predicate_strength,
                                      negative_prompt=options.negative, output=options.output)}
     count = 0
-    for index, cell in enumerate(notebook['cells']):
-        if cell['cell_type'] != 'code':
-            continue
-        source = cell['source']
-        source = ''.join(source) if isinstance(source, list) else source
-        # Dependencies are installed once by the caller, not inside Python exec.
-        source = '\n'.join(line for line in source.splitlines()
-                           if not line.lstrip().startswith(('%pip ', '!pip ')))
-        compiled = compile(source, f'{path}:cell-{index}', 'exec')
+    for index, compiled in compile_notebook(path):
         count += 1
         last_cell = index == len(notebook['cells']) - 1
         if not options.check and not ((options.compare or options.four_way) and last_cell):

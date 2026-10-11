@@ -27,14 +27,9 @@ def scheduler_metadata(value):
 
 
 def notebook_cells():
-    path = Path(__file__).resolve().parent / 'pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb'
-    notebook = json.loads(path.read_text(encoding='utf-8'))
-    for index, cell in enumerate(notebook['cells']):
-        if cell['cell_type'] == 'code':
-            source = ''.join(cell['source']) if isinstance(cell['source'], list) else cell['source']
-            source = '\n'.join(line for line in source.splitlines()
-                               if not line.lstrip().startswith(('%pip ', '!pip ')))
-            yield index, compile(source, f'{path}:cell-{index}', 'exec')
+    from fuzzydiff.paths import canonical_notebook
+    from fuzzydiff.notebook_runtime import compile_notebook
+    yield from compile_notebook(canonical_notebook())
 
 
 def save_attention(path, store):

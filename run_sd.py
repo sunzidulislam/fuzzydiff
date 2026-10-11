@@ -30,7 +30,10 @@ import torch.nn.functional as F
 from diffusers import DPMSolverMultistepScheduler, StableDiffusionPipeline
 
 DEFAULT_MODEL = 'stable-diffusion-v1-5/stable-diffusion-v1-5'
-NOTEBOOK = Path(__file__).resolve().parent / 'pipeline_fuzzy/fuzzydiff-fullpipeline.ipynb'
+from fuzzydiff.paths import canonical_notebook
+from fuzzydiff.notebook_runtime import load_prefix_definitions
+
+NOTEBOOK = canonical_notebook()
 # Cell prefixes holding backbone-independent fuzzy logic: config, membership and truth,
 # the loss, attention collection and tracked-phrase tokenizer alignment.
 FUZZY_DEFINITIONS = ('@dataclass', 'def soft_truth', 'def compute_fuzzy_loss',
@@ -42,12 +45,7 @@ def load_fuzzy_definitions():
     namespace = {'torch': torch, 'F': F, 'math': math, 'Path': Path,
                  'dataclass': dataclass, 'field': field, 'asdict': asdict,
                  'List': List, 'Dict': Dict, 'Optional': Optional, 'Union': Union}
-    for cell in json.loads(NOTEBOOK.read_text(encoding='utf-8'))['cells']:
-        source = cell['source']
-        source = ''.join(source) if isinstance(source, list) else source
-        if cell['cell_type'] == 'code' and source.startswith(FUZZY_DEFINITIONS):
-            exec(compile(source, str(NOTEBOOK), 'exec'), namespace)
-    return namespace
+    return load_prefix_definitions(NOTEBOOK, FUZZY_DEFINITIONS, namespace)
 
 
 class FuzzyStableDiffusionPipeline(StableDiffusionPipeline):
