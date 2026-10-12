@@ -210,6 +210,11 @@ display(result.image)
 
 Whole-model timing combines base/refinement in each main row; profiled components
 come from a separate pass. Read [BENCHMARK.md](BENCHMARK.md) for its limitations.
+Model sessions own profiling through `profile(seed)`, returning an image and
+exclusive measurements while restoring temporary instrumentation on failure.
+Benchmark callers do not access pipelines to install hooks. Native inference,
+reset scheduling, peak memory measurement, and saving remain separate from the
+profiling pass. CPU sessions profile without CUDA synchronization.
 Snow workflows retain code-fingerprint resume checks; use fresh output directories
 after this refactor. Saved artifacts may still be reviewed without resampling.
 

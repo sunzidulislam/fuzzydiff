@@ -540,3 +540,32 @@ compile; all seven notebook hashes remain unchanged. This verifies structural
 and CPU compatibility only; no GPU results or image-quality improvements were
 measured. Review decisions are recorded in
 docs/superpowers/reviews/2026-10-12-repository-structure.md.
+
+## 2026-10-13: deeper session and benchmark modules
+
+ModelSession now owns the separate profiling pass through profile(seed), returning
+the image and existing exclusive measurements. Benchmark workers consume this
+result rather than reaching into pipelines to install instrumentation. Native
+timing, reset placement, peak memory measurement, image saving, profile output
+keys, and native/profile pixel comparison retain their existing definitions.
+
+Archived, SDXL and Turbo private generation dispatch now accepts one internal
+GenerationContext. SD 1.5 keeps its existing generate override and inherits
+session profiling. Ordinary generate_image(request) and legacy NotebookModel
+construction remain supported. No notebook mathematics changed.
+
+One independent review found a CPU profiling defect and a validation gap.
+The CPU defect was reproduced before fixing device-aware synchronization.
+The existing real random-weight seeded-pixel fixture now tests session.profile,
+and a fake worker checks serialization without exposing internal pipelines.
+Instrumentation restoration on success and failure is covered.
+
+The isolated candidate passed 116 CPU tests in 39.150 seconds. A concurrent
+notebook edit briefly caused an unrelated about_equal_to mirror failure in the
+active checkout; it was preserved and excluded from the candidate. At resume,
+that edit was no longer present and all eight tracked notebook contents matched
+the baseline. All 53 root/package Python files and 26 canonical code cells
+compile. Final active-checkout verification is recorded in the session review.
+No pretrained downloads, GPU generations, image-quality improvements, or T4
+performance measurements are claimed. See
+docs/superpowers/reviews/2026-10-12-session-depth.md for review rulings and costs.

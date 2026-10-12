@@ -20,6 +20,6 @@ class TurboSession(ModelSession):
         self.pipelines = [self.base]
         self.checkpoints = ['stabilityai/sdxl-turbo']
 
-    def _generate(self, seed, common, prompt, words, generator, groups, indices, phase):
+    def _generate(self, context):
         o, ns = self.options, self.ns
-        return self.base(**common, negative_prompt=o['negative']).images[0]
+        return self.base(**context.common, negative_prompt=o['negative']).images[0]

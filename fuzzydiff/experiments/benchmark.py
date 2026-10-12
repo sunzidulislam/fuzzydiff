@@ -35,9 +35,7 @@ def run_worker(method, options):
     import gc
     import importlib.metadata
     import torch
-    from contextlib import ExitStack
     from fuzzydiff.models.registry import NotebookModel
-    from fuzzydiff.reporting.timing import TimeLedger, instrument_pipelines
 
     directory = Path(options['output']) / method
     directory.mkdir(exist_ok=True)
@@ -95,33 +93,15 @@ def run_worker(method, options):
                     row.update(image=str(path), save_s=perf_counter() - start)
                     # Profiling is a separate inference, never part of the native timer.
                     model.reset()
-                    ledger = TimeLedger(synchronize=torch.cuda.synchronize)
-                    counts = {'unet_forward_calls': 0}
-
-                    def count_forward(*args):
-                        counts['unet_forward_calls'] += 1
-
                     try:
-                        with ExitStack() as stack:
-                            stack.enter_context(instrument_pipelines(model.pipelines, ledger))
-                            stack.enter_context(model.profile_preprocessing(ledger))
-                            for pipeline in model.pipelines:
-                                handle = pipeline.unet.register_forward_pre_hook(count_forward)
-                                stack.callback(handle.remove)
-                            with ledger.measure('generation'):
-                                profiled_image = model.generate(seed, ledger)
-                        seconds = dict(ledger.seconds)
+                        profiled = model.profile(seed)
+                        profiled_image = profiled.image
                         row['profile'] = {
-                            'preprocess_s': seconds.get('preprocess', 0),
-                            'tokenize_s': seconds.get('tokenize', 0),
-                            'text_encode_s': seconds.get('text_encode', 0),
-                            'generation_s': seconds.get('generation', 0) + seconds.get('vae', 0),
-                            'profile_total_s': sum(seconds.values()),
-                            'exclusive_seconds': seconds, 'calls': dict(ledger.calls), **counts,
+                            **profiled.measurements,
                             'same_pixels_as_native': image.tobytes() == profiled_image.tobytes(),
                         }
                         row['profile_status'] = 'ok'
-                        del profiled_image
+                        del profiled_image, profiled
                     except Exception as error:
                         row.update(profile_status='error', profile_error=f'{type(error).__name__}: {error}')
                         traceback.print_exc()

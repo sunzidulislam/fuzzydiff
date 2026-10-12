@@ -1,6 +1,6 @@
 # Deepen model sessions and benchmarking
 
-Status: proposed; awaiting written-spec review.
+Status: approved by user; implementation requested.
 
 ## Intent and constraints
 

@@ -44,7 +44,9 @@ class SDXLSession(ModelSession):
                             'stabilityai/stable-diffusion-xl-refiner-1.0',
                             'madebyollin/sdxl-vae-fp16-fix']
 
-    def _generate(self, seed, common, prompt, words, generator, groups, indices, phase):
+    def _generate(self, context):
+        seed, common, prompt = context.seed, context.common, context.prompt
+        words, generator = context.words, context.generator
         o, ns = self.options, self.ns
         if self.method == 'aesthetic':
             latent = self.base(**common, negative_prompt=o['negative'],

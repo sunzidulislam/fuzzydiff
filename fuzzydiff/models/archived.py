@@ -30,7 +30,9 @@ class ArchivedSession(ModelSession):
         self.pipelines = [self.base]
         self.checkpoints = [checkpoint]
 
-    def _generate(self, seed, common, prompt, words, generator, groups, indices, phase):
+    def _generate(self, context):
+        seed, common, prompt = context.seed, context.common, context.prompt
+        groups, indices, phase = context.groups, context.indices, context.phase
         o, ns = self.options, self.ns
         if self.method == 'stable':
             return self.base(**common, negative_prompt=o['negative']).images[0]

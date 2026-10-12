@@ -1,5 +1,6 @@
 """Shared model lifecycle and benchmark instrumentation; no scientific algorithms."""
 import hashlib
+from dataclasses import dataclass
 from contextlib import nullcontext, contextmanager, ExitStack
 from functools import wraps
 from pathlib import Path
@@ -7,6 +8,24 @@ from time import perf_counter
 
 from . import registry
 from fuzzydiff.notebook_runtime import release_definitions
+
+
+@dataclass
+class GenerationContext:
+    seed: int
+    common: dict
+    prompt: str
+    words: list
+    generator: object
+    groups: dict
+    indices: list
+    phase: object
+
+
+@dataclass
+class ProfileResult:
+    image: object
+    measurements: dict
 
 
 class ModelSession:
@@ -121,7 +140,39 @@ class ModelSession:
                 indices = sorted({group[-1] for group in groups.values()})
             self.last_details = {'phrase_token_groups': groups, 'target_indices': indices,
                                  'effective_sampling_settings': sampling}
-        return self._generate(seed, common, prompt, words, generator, groups, indices, phase)
+        return self._generate(GenerationContext(
+            seed, common, prompt, words, generator, groups, indices, phase))
+
+    def profile(self, seed):
+        from fuzzydiff.reporting.timing import TimeLedger, instrument_pipelines
+
+        device = getattr(self, 'device', None)
+        synchronize = (self.torch.cuda.synchronize if device is None or device.type == 'cuda'
+                       else lambda: None)
+        ledger = TimeLedger(synchronize=synchronize)
+        counts = {'unet_forward_calls': 0}
+
+        def count_forward(*args):
+            counts['unet_forward_calls'] += 1
+
+        # Hooks belong to the session; callers only consume the measurements.
+        with ExitStack() as stack:
+            stack.enter_context(instrument_pipelines(self.pipelines, ledger))
+            stack.enter_context(self.profile_preprocessing(ledger))
+            for pipeline in self.pipelines:
+                handle = pipeline.unet.register_forward_pre_hook(count_forward)
+                stack.callback(handle.remove)
+            with ledger.measure('generation'):
+                image = self.generate(seed, ledger)
+        seconds = dict(ledger.seconds)
+        return ProfileResult(image, {
+            'preprocess_s': seconds.get('preprocess', 0),
+            'tokenize_s': seconds.get('tokenize', 0),
+            'text_encode_s': seconds.get('text_encode', 0),
+            'generation_s': seconds.get('generation', 0) + seconds.get('vae', 0),
+            'profile_total_s': sum(seconds.values()),
+            'exclusive_seconds': seconds, 'calls': dict(ledger.calls), **counts,
+        })
 
     def __enter__(self):
         return self
@@ -160,5 +211,5 @@ class NotebookModel(ModelSession):
         session = registry.create_session(method, options)
         self.__dict__.update(session.__dict__)
 
-    def _generate(self, *args):
-        return registry.adapter_class(self.method)._generate(self, *args)
+    def _generate(self, context):
+        return registry.adapter_class(self.method)._generate(self, context)

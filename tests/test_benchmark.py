@@ -209,7 +209,6 @@ class BenchmarkTests(unittest.TestCase):
         import torch
         from test_sd_fuzzy import tiny_pipeline
         from benchmark_models import NotebookModel
-        from benchmark_timing import TimeLedger, instrument_pipelines
         torch.set_num_threads(1)
         with tempfile.TemporaryDirectory() as folder:
             pipeline, _ = tiny_pipeline(Path(folder), None)
@@ -220,15 +219,13 @@ class BenchmarkTests(unittest.TestCase):
                                  steps=2, guidance=7.5, negative='')
             model.base, model.pipelines = pipeline, [pipeline]
             native = model.generate(42)
-            ledger = TimeLedger()
             original = pipeline.text_encoder.forward
-            with instrument_pipelines([pipeline], ledger):
-                with ledger.measure('generation'):
-                    profiled = model.generate(42, ledger)
-            self.assertEqual(native.tobytes(), profiled.tobytes())
+            profiled = model.profile(42)
+            self.assertEqual(native.tobytes(), profiled.image.tobytes())
             self.assertEqual(pipeline.text_encoder.forward, original)
             for category in ('preprocess', 'tokenize', 'text_encode', 'vae', 'generation'):
-                self.assertGreater(ledger.seconds[category], 0)
+                self.assertGreater(profiled.measurements['exclusive_seconds'][category], 0)
+            self.assertEqual(profiled.measurements['unet_forward_calls'], 2)
 
     def test_cpu_worker_failure_produces_report_without_fabricated_measurements(self):
         runner = self.module('run_benchmark')

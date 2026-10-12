@@ -30,8 +30,9 @@ class ModelRegistryTests(unittest.TestCase):
             binding_weight=2, hedge_guidance=True, refine_strength=.4, refine_steps=30,
             predicate_strength=.5)
         session.last_details = {}
-        session._generate(42, {}, 'mostly blue vase on table', ['mostly blue', 'vase', 'table'],
-                          torch.Generator().manual_seed(42), {}, [], lambda name: nullcontext())
+        session.options.update(prompt='mostly blue vase on table', words=['mostly blue', 'vase', 'table'])
+        session.torch, session.device = torch, torch.device('cpu')
+        session.generate(42)
         self.assertEqual(seen['relations'], [('mostly blue', 'bound_to', 'vase'), ('vase', 'above', 'table')])
         self.assertTrue(seen['hedge_guidance'])
         self.assertEqual(seen['binding_loss_weight'], 2)

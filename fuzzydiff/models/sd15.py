@@ -282,6 +282,7 @@ from .session import ModelSession
 class PlainSD15Session(ModelSession):
     def __init__(self, method, options):
         self.method, self.options = method, options
+        self.torch = torch
         self.pipelines, self.ns, self.last_details = [], {}, {}
         self.original_processors = []
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
