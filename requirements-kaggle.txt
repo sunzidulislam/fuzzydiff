@@ -1,0 +1,11 @@
+torch==2.15.0
+diffusers==0.31.0
+transformers==4.56.2
+accelerate==1.10.1
+sentencepiece
+protobuf
+scipy
+scikit-learn
+pyyaml
+pillow
+numpy

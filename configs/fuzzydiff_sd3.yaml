@@ -1,0 +1,305 @@
+# FuzzyDiff settings: single source for the paper (config.tex) and the experiment code.
+# status: verified | proposed. Replace every 'proposed' value by the value of the run.
+groups:
+- group: backbone (checkpoint-specific)
+  settings:
+  - name: cfgCheckpoint
+    value: SD3-Medium, \nolinkurl{stabilityai/stable-diffusion-3-medium-diffusers}, revision [hash]
+    status: proposed
+  - name: cfgDiffusers
+    value: \verify{[installed version]} (processor unit-tested on 0.31.0)
+    status: verified
+  - name: cfgBlocks
+    value: '24'
+    status: verified
+    note: SD3-Medium MMDiT blocks
+  - name: cfgHidden
+    value: '1536'
+    status: verified
+  - name: cfgHeads
+    value: '24'
+    status: verified
+  - name: cfgHeadDim
+    value: '64'
+    status: verified
+  - name: cfgResolution
+    value: $1024\times1024$
+    status: verified
+  - name: cfgImageTokens
+    value: '4096'
+    status: verified
+    note: (1024/8/2)^2
+  - name: cfgClipTokens
+    value: '77'
+    status: verified
+  - name: cfgTFiveTokens
+    value: '256'
+    status: verified
+    note: diffusers default max_sequence_length
+  - name: cfgSteps
+    value: '28'
+    status: proposed
+    note: diffusers default; confirm run value
+  - name: cfgCFG
+    value: '7.0'
+    status: proposed
+  - name: cfgShift
+    value: '3.0'
+    status: proposed
+  - name: cfgVAEScale
+    value: '1.5305'
+    status: proposed
+  - name: cfgVAEShift
+    value: '0.0609'
+    status: proposed
+  - name: cfgPrecision
+    value: bf16 weights; fp32 estimator outputs, losses, and updates
+    status: proposed
+  - name: cfgGPU
+    value: '[GPU model, memory]'
+    status: proposed
+- group: parser and grounding
+  settings:
+  - name: cfgParser
+    value: '[parser and model version, e.g., spaCy x.y with en\_core\_web\_trf]'
+    status: proposed
+  - name: cfgReadBlocks
+    value: '[selected on dev, e.g., 6--18]'
+    status: proposed
+  - name: cfgGrid
+    value: $64\times64$
+    status: verified
+  - name: cfgChunk
+    value: '1024'
+    status: proposed
+  - name: cfgBindAUROC
+    value: '0.70'
+    status: proposed
+  - name: cfgUninf
+    value: '[threshold]'
+    status: proposed
+- group: estimators
+  settings:
+  - name: cfgCLIPSeg
+    value: CIDAS/clipseg-rd64-refined
+    status: proposed
+  - name: cfgSigLIP
+    value: google/siglip-so400m-patch14-384
+    status: proposed
+  - name: cfgBins
+    value: '4'
+    status: proposed
+  - name: cfgRhoMin
+    value: '0.6'
+    status: proposed
+  - name: cfgAUCMin
+    value: '0.85'
+    status: proposed
+  - name: cfgPMin
+    value: '0.5'
+    status: proposed
+  - name: cfgAMin
+    value: '0.005'
+    status: proposed
+  - name: cfgErode
+    value: '3'
+    status: proposed
+  - name: cfgEpsPhi
+    value: '0.02'
+    status: proposed
+  - name: cfgBoxK
+    value: '2.5'
+    status: proposed
+  - name: cfgSupportConfMin
+    value: '0.5'
+    status: proposed
+    note: 'psi_min: min. support reliability score for support-dependent constraints'
+  - name: cfgSigmaP
+    value: '0.004'
+    status: proposed
+    note: 's_p: color integration scale as a fraction of image width (sigma_p = s_p W)'
+- group: optimization
+  settings:
+  - name: cfgGuided
+    value: $\sigma_t\ge\sigma_{{\rm lo},r}$ per family
+    status: verified
+    note: family-dependent guided windows (activation rule)
+  - name: cfgEtaZero
+    value: '[value]'
+    status: proposed
+  - name: cfgDelta
+    value: '[value]'
+    status: proposed
+  - name: cfgCSigma
+    value: '[schedule]'
+    status: proposed
+  - name: cfgMaxPert
+    value: '[value]'
+    status: proposed
+  - name: cfgLambda
+    value: '[per family]'
+    status: proposed
+  - name: cfgEpsAcc
+    value: '[value]'
+    status: proposed
+  - name: cfgSigmaLo
+    value: '[per family, from the grid]'
+    status: proposed
+    note: sigma_lo,r chosen per family on G_sys by the activation rule
+  - name: cfgNact
+    value: '3'
+    status: proposed
+    note: min. active guided steps per degree family (activation rule)
+  - name: cfgActShare
+    value: '0.8'
+    status: proposed
+    note: min. share of dev prompts reaching n_act for a family to count as degree-guided
+  - name: cfgSigmaGrid
+    value: 0.75, 0.5, 0.25, 0
+    status: proposed
+    note: candidate lower window ends (activation rule)
+- group: SAR
+  settings:
+  - name: cfgStrength
+    value: '[value]'
+    status: proposed
+  - name: cfgKSteps
+    value: '[$K$]'
+    status: proposed
+  - name: cfgAlpha
+    value: '[value]'
+    status: proposed
+  - name: cfgBeta
+    value: '[value]'
+    status: proposed
+  - name: cfgTemp
+    value: '0.1'
+    status: proposed
+  - name: cfgGammaMin
+    value: '0.3'
+    status: proposed
+  - name: cfgOverlap
+    value: '0.3'
+    status: proposed
+  - name: cfgNest
+    value: '0.8'
+    status: proposed
+  - name: cfgSARBlocks
+    value: '[list]'
+    status: proposed
+- group: attention confidence and contrastive binding
+  settings:
+  - name: cfgPeak
+    value: '2.0'
+    status: proposed
+    note: 'kappa_pk: min. peak-to-mean ratio of raw B_q'
+  - name: cfgMassMin
+    value: '0.5'
+    status: proposed
+    note: 'm_min: min. phrase mass relative to uniform share'
+  - name: cfgBindMargin
+    value: '0.05'
+    status: proposed
+    note: 'm_b: contrastive binding margin'
+  - name: cfgSmaxTemp
+    value: '0.02'
+    status: proposed
+    note: temperature of the log-MEAN-exp soft maximum in beta(a,q)
+- group: gradient-validity test
+  settings:
+  - name: cfgDirAcc
+    value: '0.8'
+    status: proposed
+    note: min. directional accuracy of the independent measure
+  - name: cfgTransfer
+    value: '0.5'
+    status: proposed
+    note: min. transfer ratio Delta y / Delta s
+  - name: cfgGVN
+    value: '[\#]'
+    status: proposed
+    note: prompt-seed pairs per family
+- group: Stage-2 spatial consistency
+  settings:
+  - name: cfgConsIoU
+    value: '0.5'
+    status: proposed
+    note: theta_cons
+  - name: cfgConsShift
+    value: '0.05'
+    status: proposed
+    note: delta_c (fraction of image side)
+- group: presence target vs. gate; calibration error
+  settings:
+  - name: cfgPresTarget
+    value: '0.9'
+    status: proposed
+    note: 'p*: guidance target probability'
+  - name: cfgPresKappa
+    value: '1.0'
+    status: proposed
+    note: kappa_pres (logit units)
+  - name: cfgECEMax
+    value: '0.05'
+    status: proposed
+    note: max. expected calibration error of presence
+  - name: cfgPresVisQuantile
+    value: '0.25'
+    status: proposed
+    note: quantile of presence among present, hedge-acceptable images = presence target for visibility hedges
+- group: acceptance tolerances per tier
+  settings:
+  - name: cfgEpsOne
+    value: '[value]'
+    status: proposed
+  - name: cfgEpsTwo
+    value: '[value]'
+    status: proposed
+- group: gradient-validity boundary handling
+  settings:
+  - name: cfgGVShift
+    value: '0.3'
+    status: proposed
+    note: commanded shift on the perceived scale
+  - name: cfgGVMargin
+    value: '0.05'
+    status: proposed
+    note: margin to the calibrated range
+  - name: cfgGVHeadroom
+    value: '0.10'
+    status: proposed
+    note: min. headroom, else the direction is skipped
+- group: round 4 additions
+  settings:
+  - name: cfgTauMin
+    value: '[from dev pointing curve]'
+    status: proposed
+    note: 'tau_min: absolute text mass'
+  - name: cfgBacktrack
+    value: '2'
+    status: proposed
+    note: max. step halvings after rejection
+  - name: cfgRampSteps
+    value: '2'
+    status: proposed
+    note: ramp-in steps after a family becomes valid
+  - name: cfgDomBand
+    value: '0.1'
+    status: proposed
+    note: width of the domain margin band (fraction of |E|)
+  - name: cfgNmin
+    value: '200'
+    status: proposed
+    note: min. images per family x bin for a validity decision
+  - name: cfgNposMin
+    value: '50'
+    status: proposed
+    note: min. positives and negatives per AUROC/ECE estimate
+  - name: cfgFDmax
+    value: '0.10'
+    status: proposed
+    note: max. false-disable rate per object-size stratum
+  - name: cfgDeltaRel
+    value: '0.5'
+    status: proposed
+    note: centroid drift in object radii

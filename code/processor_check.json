@@ -1,0 +1,93 @@
+{
+  "identity_out_no qk-norm": [
+    0.0,
+    0.0
+  ],
+  "identity_grad_no qk-norm": [
+    0.0,
+    0.0
+  ],
+  "sar_r1_out_no qk-norm": [
+    0.0,
+    0.0
+  ],
+  "readout_val_no qk-norm": [
+    2.7755575615628914e-15,
+    1.1229777196620839e-14
+  ],
+  "share_val_no qk-norm": [
+    3.3584246494910985e-15,
+    6.7213886839454985e-15
+  ],
+  "mass_val_no qk-norm": [
+    2.9976021664879227e-15,
+    5.226940224415726e-15
+  ],
+  "readout_grad_no qk-norm": [
+    4.707345624410664e-13,
+    2.320577238630508e-14
+  ],
+  "sar_equiv_no qk-norm": [
+    5.684341886080802e-14,
+    2.4688684107678055e-15
+  ],
+  "sar_uncond_no qk-norm": [
+    0.0,
+    0.0
+  ],
+  "sar_changes_cond_no qk-norm": [
+    2.8613552883731352,
+    0.17541539696861036
+  ],
+  "identity_out_qk-norm": [
+    0.0,
+    0.0
+  ],
+  "identity_grad_qk-norm": [
+    0.0,
+    0.0
+  ],
+  "sar_r1_out_qk-norm": [
+    0.0,
+    0.0
+  ],
+  "readout_val_qk-norm": [
+    2.0816681711721685e-17,
+    1.0694539726966722e-15
+  ],
+  "share_val_qk-norm": [
+    1.1102230246251565e-16,
+    5.498707956782538e-16
+  ],
+  "mass_val_qk-norm": [
+    1.942890293094024e-16,
+    9.730744307254334e-16
+  ],
+  "readout_grad_qk-norm": [
+    3.707971429900425e-17,
+    3.0859386651837455e-15
+  ],
+  "sar_equiv_qk-norm": [
+    1.5987211554602254e-14,
+    1.0482771772416682e-15
+  ],
+  "sar_uncond_qk-norm": [
+    0.0,
+    0.0
+  ],
+  "sar_changes_cond_qk-norm": [
+    1.127746407300601,
+    0.0780110183425233
+  ],
+  "fd_grad_no qk-norm": [
+    9.715010105537658e-05,
+    1.0813424613459919e-07
+  ],
+  "fd_grad_qk-norm": [
+    9.715010105537658e-05,
+    1.0813424613459919e-07
+  ],
+  "gradcheck_readout": true,
+  "torch": "2.15.0+cpu",
+  "diffusers": "0.31.0"
+}

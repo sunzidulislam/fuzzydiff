@@ -1,0 +1,89 @@
+{
+  "sigma_p": 2.0,
+  "n_per_class": 40,
+  "pairs": {
+    "greenish-gray": {
+      "auroc_blend_vs_twotone": 1.0,
+      "varpi_U_mean": 0.0007765779827313297,
+      "varpi_T_mean": 0.41602005399012043,
+      "auroc_varpi_blend_vs_offaxis": 0.9825,
+      "auroc_zeta_blend_vs_offaxis": 1.0,
+      "axis_length_ab": 0.175853908403403
+    },
+    "turquoise-green": {
+      "auroc_blend_vs_twotone": 0.843125,
+      "varpi_U_mean": 0.08630190251457814,
+      "varpi_T_mean": 0.29149518783874173,
+      "auroc_varpi_blend_vs_offaxis": 0.39875,
+      "auroc_zeta_blend_vs_offaxis": 1.0,
+      "axis_length_ab": 0.11323362164763838
+    },
+    "coral-orange": {
+      "auroc_blend_vs_twotone": 0.950625,
+      "varpi_U_mean": 0.01669391539704117,
+      "varpi_T_mean": 0.2964410830866178,
+      "auroc_varpi_blend_vs_offaxis": 0.925,
+      "auroc_zeta_blend_vs_offaxis": 1.0,
+      "axis_length_ab": 0.05428725266430768
+    },
+    "bluish-purple": {
+      "auroc_blend_vs_twotone": 1.0,
+      "varpi_U_mean": 0.0005618489047011061,
+      "varpi_T_mean": 0.43290325337754726,
+      "auroc_varpi_blend_vs_offaxis": 0.69625,
+      "auroc_zeta_blend_vs_offaxis": 1.0,
+      "axis_length_ab": 0.18780226741724157
+    },
+    "pinkish-white": {
+      "auroc_blend_vs_twotone": 0.98875,
+      "varpi_U_mean": 0.006322428953655422,
+      "varpi_T_mean": 0.40931744671098924,
+      "auroc_varpi_blend_vs_offaxis": 0.595625,
+      "auroc_zeta_blend_vs_offaxis": 1.0,
+      "axis_length_ab": 0.07483375675505971
+    },
+    "reddish-brown": {
+      "auroc_blend_vs_twotone": 1.0,
+      "varpi_U_mean": 0.0017025847099184446,
+      "varpi_T_mean": 0.35379241933514327,
+      "auroc_varpi_blend_vs_offaxis": 1.0,
+      "auroc_zeta_blend_vs_offaxis": 1.0,
+      "axis_length_ab": 0.1443658969062733
+    }
+  },
+  "bound_property_trials": 300,
+  "acceptance_as_blend": {
+    "varpi_only": {
+      "U": 0.95,
+      "T": 0.24583333333333332,
+      "O": 0.9583333333333334
+    },
+    "varpi_and_zeta": {
+      "U": 0.9,
+      "T": 0.22916666666666666,
+      "O": 0.0
+    }
+  },
+  "overall": {
+    "auroc_blend_vs_twotone": 0.9435069444444445,
+    "varpi_U_mean": 0.01872654307710427,
+    "auroc_varpi_blend_vs_offaxis": 0.6291493055555556,
+    "auroc_zeta_blend_vs_offaxis": 1.0,
+    "varpi_T_mean": 0.3666615740565266,
+    "mottled_varpi_by_grain_px": {
+      "1": 0.12852393879037577,
+      "2": 0.29944278464748725,
+      "4": 0.4988529692826056,
+      "8": 0.6396482944262802
+    },
+    "twotone_varpi_by_stripe_px": {
+      "split": 0.723544384206202,
+      "6": 0.026311874622346666,
+      "12": 0.22122121308030046,
+      "24": 0.49556882431725724
+    },
+    "rho_mae_trimmed": 0.040392107470907844,
+    "rho_mae_untrimmed": 0.04459011990382174,
+    "mean_only_rho_gap_twotone_vs_blend": 0.15962245630633343
+  }
+}

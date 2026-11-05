@@ -1,0 +1,21 @@
+{
+  "(i) soft attribute": {
+    "n": 640,
+    "precision": 1.0,
+    "recall": 1.0,
+    "exact": 1.0
+  },
+  "(ii) color mixture": {
+    "n": 400,
+    "precision": 1.0,
+    "recall": 1.0,
+    "exact": 1.0
+  },
+  "(iii) size": {
+    "n": 2700,
+    "precision": 1.0,
+    "recall": 1.0,
+    "exact": 1.0
+  },
+  "targeted cases": "pass"
+}

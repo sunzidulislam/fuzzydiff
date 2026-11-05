@@ -1,0 +1,82 @@
+{
+  "by_category": {
+    "comparison": {
+      "n": 10,
+      "exact": 8,
+      "precision": 0.8666666666666668,
+      "recall": 0.8666666666666668,
+      "exact_rate": 0.8
+    },
+    "negation": {
+      "n": 8,
+      "exact": 5,
+      "precision": 0.8125,
+      "recall": 0.8125,
+      "exact_rate": 0.625
+    },
+    "color order": {
+      "n": 8,
+      "exact": 7,
+      "precision": 1.0,
+      "recall": 0.953125,
+      "exact_rate": 0.875
+    },
+    "attribute/context": {
+      "n": 6,
+      "exact": 6,
+      "precision": 1.0,
+      "recall": 1.0,
+      "exact_rate": 1.0
+    },
+    "out of grammar": {
+      "n": 5,
+      "exact": 1,
+      "precision": 0.3,
+      "recall": 0.3333333333333333,
+      "exact_rate": 0.2
+    }
+  },
+  "failures": [
+    {
+      "category": "comparison",
+      "prompt": "a mug very much bigger than a spoon"
+    },
+    {
+      "category": "comparison",
+      "prompt": "a vase much larger than a cup"
+    },
+    {
+      "category": "negation",
+      "prompt": "a mug that is not red"
+    },
+    {
+      "category": "negation",
+      "prompt": "a field with almost no flowers"
+    },
+    {
+      "category": "negation",
+      "prompt": "a sky without birds above a lake"
+    },
+    {
+      "category": "color order",
+      "prompt": "a bluish-purple bowl and a reddish-brown jar"
+    },
+    {
+      "category": "out of grammar",
+      "prompt": "a mug that is slightly dark"
+    },
+    {
+      "category": "out of grammar",
+      "prompt": "a slightly dark and very vivid mug"
+    },
+    {
+      "category": "out of grammar",
+      "prompt": "a mug slightly darker than the teapot"
+    },
+    {
+      "category": "out of grammar",
+      "prompt": "a teapot next to a slightly larger mug"
+    }
+  ],
+  "in_grammar_exact": 0.8125
+}

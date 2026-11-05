@@ -1,0 +1,71 @@
+# Provisional values: starting guesses, not measurements. Results from these are never paper evidence.
+cfgEtaZero: 0.05
+cfgDelta: 0.1
+cfgCSigma: 1.0
+cfgMaxPert: 0.2
+cfgLambda: 1.0
+cfgEpsAcc: 0.01
+cfgSigmaLo: 0.25
+cfgEpsOne: 0.01
+cfgEpsTwo: 0.01
+cfgStrength: 0.4
+cfgKSteps: 11
+cfgAlpha: 1.0
+cfgBeta: 0.5
+cfgReadBlocks: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+cfgSARBlocks: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+cfgTauMin: 0.0
+cfgUninf: 1.0
+cfgGVN: 20
+cfgParser: template grammar (predicates.py)
+
+hedge_centers:
+  barely: 0.05
+  a little: 0.10
+  slightly: 0.15
+  somewhat: 0.35
+  moderately: 0.50
+  considerably: 0.70
+  very: 0.85
+  nearly: 0.90
+  extremely: 0.95
+default_center: 0.50
+hedge_halfwidth: 0.1
+hedge_kappa: 0.1
+size_kappa: 0.1
+size_c68: 0.1
+size_c95: 0.2
+theta_drift: 0.5
+psi: 1.0
+binding_kappa: 0.05
+leakage_max: 0.25
+leakage_kappa: 0.1
+f6_e_max: 0.5
+f6_varpi_max: 0.5
+f6_zeta_max: 0.25
+f6_bound_kappa: 0.1
+g_min: 1.0e-12
+eps_g: 1.0e-8
+
+# Hand-chosen sRGB [0, 1]; replaced by annotated prototypes in fitted calibration.
+prototypes:
+  red: [0.80, 0.12, 0.12]
+  blue: [0.12, 0.25, 0.80]
+  green: [0.15, 0.60, 0.20]
+  yellow: [0.92, 0.82, 0.15]
+  orange: [0.92, 0.50, 0.10]
+  purple: [0.50, 0.18, 0.65]
+  pink: [0.95, 0.60, 0.72]
+  brown: [0.45, 0.28, 0.15]
+  gray: [0.50, 0.50, 0.50]
+  white: [0.95, 0.95, 0.95]
+  black: [0.08, 0.08, 0.08]
+  turquoise: [0.20, 0.75, 0.72]
+  coral: [0.98, 0.50, 0.42]
+  teal: [0.05, 0.50, 0.50]
+  lavender: [0.72, 0.62, 0.90]
+  greenish-gray: [0.47, 0.55, 0.47]
+  turquoise-green: [0.18, 0.68, 0.46]
+  coral-orange: [0.95, 0.50, 0.26]
+  bluish-purple: [0.31, 0.22, 0.72]
+  pinkish-white: [0.95, 0.85, 0.88]

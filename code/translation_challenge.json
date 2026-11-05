@@ -1,0 +1,64 @@
+{
+  "by_category": {
+    "comparison": {
+      "n": 10,
+      "exact": 10,
+      "precision": 1.0,
+      "recall": 1.0,
+      "wrong": 0,
+      "degraded": 0,
+      "exact_rate": 1.0
+    },
+    "negation": {
+      "n": 8,
+      "exact": 8,
+      "precision": 1.0,
+      "recall": 1.0,
+      "wrong": 0,
+      "degraded": 0,
+      "exact_rate": 1.0
+    },
+    "color order": {
+      "n": 8,
+      "exact": 8,
+      "precision": 1.0,
+      "recall": 1.0,
+      "wrong": 0,
+      "degraded": 0,
+      "exact_rate": 1.0
+    },
+    "attribute/context": {
+      "n": 6,
+      "exact": 6,
+      "precision": 1.0,
+      "recall": 1.0,
+      "wrong": 0,
+      "degraded": 0,
+      "exact_rate": 1.0
+    },
+    "out of grammar": {
+      "n": 5,
+      "exact": 2,
+      "precision": 1.0,
+      "recall": 0.5333333333333333,
+      "wrong": 0,
+      "degraded": 3,
+      "exact_rate": 0.4
+    }
+  },
+  "failures": [
+    {
+      "category": "out of grammar",
+      "prompt": "a slightly dark and very vivid mug"
+    },
+    {
+      "category": "out of grammar",
+      "prompt": "a mug slightly darker than the teapot"
+    },
+    {
+      "category": "out of grammar",
+      "prompt": "a teapot next to a slightly larger mug"
+    }
+  ],
+  "in_grammar_exact": 1.0
+}
