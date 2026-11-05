@@ -9,7 +9,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from reporting import (LeakageError, activation_rows, choose_sigma_lo, decide_support, ece,  # noqa: E402
+from reporting import (LeakageError, ProvisionalError, StepLog, read_jsonl, activation_rows, choose_sigma_lo, decide_support, ece,  # noqa: E402
                        interval_rows, shift_rows, slope_through_origin, spearman, tier_rows, transfer_rows)
 from freeze_manifest import freeze  # noqa: E402
 
@@ -40,7 +40,37 @@ def pairs(split, fam, slope, n=60, seed=0):
     return out
 
 
+def test_provisional_refused():
+    recs = logs("sys", "F2a", 3, 4)
+    for r in recs:
+        r["calibration"] = "provisional"
+    prs = pairs("sys", "F2a", 0.8)
+    for r in prs:
+        r["calibration"] = "provisional"
+    for fn in (lambda: tier_rows(recs), lambda: activation_rows(recs, 3), lambda: transfer_rows(prs),
+               lambda: shift_rows(recs), lambda: interval_rows(recs),
+               lambda: choose_sigma_lo({0.5: recs}, ["F2a"], 3, 0.8),
+               lambda: decide_support({"F2a": {"final_bin_valid": True}}, {"F2a": {"dir_lb": 1, "slope_lb": 1}},
+                                      recs, [], 3, 0.8, 0.8, 0.5)):
+        try:
+            fn()
+            assert False, "provisional records must be refused"
+        except ProvisionalError:
+            pass
+
+
+def test_steplog_tags_every_record():
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "a.jsonl")
+        log = StepLog(path, "dev", "provisional")
+        log.write(type="step")
+        log.close()
+        assert read_jsonl(path)[0]["calibration"] == "provisional"
+
+
 def main():
+    test_provisional_refused()
+    test_steplog_tags_every_record()
     # statistics helpers
     assert abs(slope_through_origin([1, 2, 3], [2, 4, 6]) - 2) < 1e-12
     assert abs(spearman([1, 2, 3, 4], [10, 20, 30, 40]) - 1) < 1e-12

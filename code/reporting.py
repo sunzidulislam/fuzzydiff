@@ -39,11 +39,22 @@ class LeakageError(RuntimeError):
     pass
 
 
+class ProvisionalError(LeakageError):
+    """Records from provisional calibration show that the pipeline runs; they are never evidence."""
+
+
 def _check_selection(records: Iterable[dict]):
     recs = list(records)
     bad = {r.get("split") for r in recs} - SELECTION_SPLITS
     if bad:
         raise LeakageError(f"selection functions may not read splits {sorted(bad)}")
+    return recs
+
+
+def _check_fitted(records: Iterable[dict]):
+    recs = list(records)
+    if any(r.get("calibration") == "provisional" for r in recs):
+        raise ProvisionalError("tables and selection may not read records from provisional calibration")
     return recs
 
 
@@ -55,11 +66,12 @@ def read_jsonl(path):
 class StepLog:
     """Minimal writer used by the guidance loop."""
 
-    def __init__(self, path, split):
-        self.f, self.split = open(path, "a"), split
+    def __init__(self, path, split, calibration):
+        self.f, self.split, self.calibration = open(path, "a"), split, calibration
 
     def write(self, **rec):
         rec["split"] = self.split
+        rec["calibration"] = self.calibration
         self.f.write(json.dumps(rec) + "\n")
 
     def close(self):
@@ -127,6 +139,7 @@ def activation_rows(records: List[dict], n_act: int):
     """Tab. activation (bottom). Per family: first valid bin, median active steps per constraint,
     share of constraints with >= n_act active steps, most frequent blocking gate, accepted share
     on active steps, mean realized tier-3 loss change per accepted step, mean mu unguided -> guided."""
+    records = _check_fitted(records)
     cons = [r for r in records if r["type"] == "constraint"]
     fin = [r for r in records if r["type"] == "final"]
     out = {}
@@ -161,6 +174,7 @@ def tier_rows(records: List[dict]):
     and *finite-step failures*: accepted steps on which the frozen tier-m loss rose by more than
     its tolerance although the first-order projection predicted no increase. Plus the rejection
     rate and the distribution of rejection reasons."""
+    records = _check_fitted(records)
     steps = [r for r in records if r["type"] == "step"]
     cons = [r for r in records if r["type"] == "constraint"]
     fin = [r for r in records if r["type"] == "final"]
@@ -190,6 +204,7 @@ def tier_rows(records: List[dict]):
 def transfer_rows(pairs: List[dict], s_min=0.05, n_boot=2000):
     """Tab. transfer_full. Directional agreement, through-origin slope with cluster-bootstrap CI,
     slope by number of active constraints, exploitation rate."""
+    pairs = _check_fitted(pairs)
     out = {}
     for fam in sorted({p["family"] for p in pairs}):
         ps = [p for p in pairs if p["family"] == fam]
@@ -213,6 +228,7 @@ def shift_rows(records: List[dict]):
     """Tab. shift. Per family and image source: estimator reliability (Spearman of calibrated
     score with ratings), membership calibration (ECE of pi*mu vs. acceptance), and the share of
     raw estimator values outside the calibrated domain."""
+    records = _check_fitted(records)
     out = {}
     for fam in sorted({r["family"] for r in records}):
         for src in sorted({r["source"] for r in records if r["family"] == fam}):
@@ -231,6 +247,7 @@ def interval_rows(judgments: List[dict]):
     """Tab. interval_ablation. judgments: variant, prompt, verdict in {weak, ok, strong},
     unguided_verdict, dy_ok (change of the independent measure on images acceptable unguided),
     pair_correct (hedge-ladder pair ordered correctly, or None), nfe, seconds."""
+    judgments = _check_fitted(judgments)
     out = {}
     for v in sorted({j["variant"] for j in judgments}):
         js = [j for j in judgments if j["variant"] == v]
@@ -256,6 +273,7 @@ def decide_support(validity: Dict[str, dict], single: Dict[str, dict], system_re
     single[fam]   = {"dir_lb": float, "slope_lb": float}     (G_int, single-family interventions)
     system_records / system_pairs                             (G_sys, full multi-constraint runs)
     Status: 'degree-guided' | 'presence/binding only' | 'unsupported', with the failed criterion."""
+    system_records, system_pairs = _check_fitted(system_records), _check_fitted(system_pairs)
     _check_selection(system_records)
     _check_selection(system_pairs)
     act = activation_rows(system_records, n_act)
