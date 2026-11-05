@@ -179,6 +179,7 @@ def main():
     # ---- 1. identity at full resolution / dtype ----
     try:
         tr.enable_gradient_checkpointing()
+        tr.training = True      # diffusers 0.31.0 checkpoints only when the top-level module's flag is set
     except Exception:
         pass
     x = torch.randn(2, in_ch, lat, lat, dtype=dt, device=dev, requires_grad=True)
@@ -284,6 +285,7 @@ def main():
     if pipe is not None:
         try:
             pipe.vae.enable_gradient_checkpointing()
+            pipe.vae.decoder.training = True
         except Exception:
             pass
     res["time_guided_s"], res["mem_guided_gb"] = timed(guided)
