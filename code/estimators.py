@@ -137,6 +137,15 @@ def _frozen(model):
     return model
 
 
+def _checkpoint_vision(model, vision):
+    """Recompute vision layers in the backward pass. These layers have no dropout, so setting their
+    training flag (which the library checks before checkpointing) changes nothing else."""
+    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    vision.encoder.training = True
+    for layer in vision.encoder.layers:
+        layer.training = True
+
+
 class ClipSegSupport:
     """Support S_q: sigmoid of pre-threshold CLIPSeg logits, area-averaged to the grid.
 
@@ -145,6 +154,7 @@ class ClipSegSupport:
 
     def __init__(self, model, encode_text, mean, std, size=352, grid=64):
         self.model, self.encode_text, self.size, self.grid = _frozen(model), encode_text, size, grid
+        _checkpoint_vision(self.model, self.model.clip.vision_model)
         self.mean, self.std = mean, std
         self._texts = {}
 
@@ -161,7 +171,7 @@ class ClipSegSupport:
 
         ip = processor.image_processor
         return cls(model, encode_text, tuple(ip.image_mean), tuple(ip.image_std),
-                   size=model.config.vision_config.image_size)
+                   size=processor_size(ip, model.config.vision_config.image_size))
 
     def _text(self, phrase):
         if phrase not in self._texts:
@@ -205,6 +215,7 @@ class SigLIPEvidence:
 
     def __init__(self, model, encode_text, mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), size=384):
         self.model, self.encode_text, self.size = _frozen(model), encode_text, size
+        _checkpoint_vision(self.model, self.model.vision_model)
         self.mean, self.std = mean, std
         self._texts = {}
 
@@ -213,14 +224,16 @@ class SigLIPEvidence:
         from transformers import AutoProcessor, SiglipModel
         processor = AutoProcessor.from_pretrained(name)
         model = SiglipModel.from_pretrained(name, torch_dtype=dtype).to(device)
+        model.text_model.to("cpu")          # about 40% of the weights; embeddings are computed once per phrase
 
         def encode_text(text):
-            tokens = processor.tokenizer([text], padding="max_length", return_tensors="pt").to(device)
+            tokens = processor.tokenizer([text], padding="max_length", return_tensors="pt")
             with torch.no_grad():
                 return model.get_text_features(**tokens)
 
         ip = processor.image_processor
-        return cls(model, encode_text, tuple(ip.image_mean), tuple(ip.image_std), size=model.config.vision_config.image_size)
+        return cls(model, encode_text, tuple(ip.image_mean), tuple(ip.image_std),
+                   size=processor_size(ip, model.config.vision_config.image_size))
 
     def _text(self, phrase):
         if phrase not in self._texts:
@@ -263,3 +276,11 @@ class FakeSigLIP:
     def logits(self, x, region, phrase):
         return (torch.as_tensor(self.fn(phrase, _chw(x)[None]), dtype=_chw(x).dtype),
                 torch.as_tensor(self.fn(phrase, region), dtype=_chw(x).dtype))
+
+
+def processor_size(image_processor, default):
+    """Input size from the preprocessor config, which can differ from the vision config."""
+    size = getattr(image_processor, "size", None)
+    if isinstance(size, dict):
+        return size.get("height", size.get("shortest_edge", default))
+    return size if isinstance(size, int) else default

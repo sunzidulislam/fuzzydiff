@@ -29,7 +29,7 @@ class GroundedPhrase:
 
 def _occurrences(prompt: str) -> Dict[str, List[Tuple[int, int]]]:
     found: Dict[str, List[Tuple[int, int]]] = {}
-    for m in re.finditer(r"\S+", prompt):
+    for m in re.finditer(r"[\w-]+", prompt):
         found.setdefault(m.group(0), []).append(m.span())
     return found
 
@@ -94,15 +94,20 @@ def _to_grid(x):
     return x.reshape(side, side) if side * side == x.numel() else x
 
 
+def _wide(x):
+    """Weights run in bf16; statistics and losses run in at least float32."""
+    return x.float() if x.dtype in (torch.bfloat16, torch.float16) else x
+
+
 def aggregate_maps(out, cond, read_blocks: Sequence[int], thresholds, weights=None) -> Dict[str, GroundedPhrase]:
     """Eq. phrase_attention and Eq. map_normalization. thresholds = (kappa_pk, m_min, tau_min)."""
     kappa_pk, m_min, tau_min = thresholds
     w = weights or {b: 1 / len(read_blocks) for b in read_blocks}
     result = {}
     for q, per_block in out.maps.items():
-        B = sum(w[b] * per_block[b] for b in read_blocks)
-        share = sum(w[b] * out.shares[q][b] for b in read_blocks).mean().detach()
-        mass = sum(w[b] * out.text_mass[b] for b in read_blocks).mean().detach()
+        B = sum(w[b] * _wide(per_block[b]) for b in read_blocks)
+        share = sum(w[b] * _wide(out.shares[q][b]) for b in read_blocks).mean().detach()
+        mass = sum(w[b] * _wide(out.text_mass[b]) for b in read_blocks).mean().detach()
         raw = B.detach()
         peak = float(raw.max() / raw.mean().clamp_min(1e-12))
         relative = float(share / (len(cond.phrase_tokens[q]) / len(cond.valid_text)))
@@ -120,3 +125,9 @@ def binding(p_a, p_q, others: List[torch.Tensor], tau: float, eps: float = 1e-6)
     competitors = torch.stack([overlap(r) for r in others])
     smax = tau * (torch.logsumexp(competitors / tau, dim=0) - math.log(len(others)))
     return overlap(p_q) - smax
+
+
+def missing_phrases(prompt: str, program) -> List[str]:
+    """Phrases the program needs that do not occur as a word of the prompt, so they cannot be grounded."""
+    occurrences = _occurrences(prompt)
+    return [w for w in dict.fromkeys(list(program.objects) + _attributes(program)) if w not in occurrences]

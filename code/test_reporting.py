@@ -19,12 +19,12 @@ def logs(split, fam, n_prompts, active_steps, accepted=True, dl=-0.1):
     for p in range(n_prompts):
         for t in range(6):
             act = t < active_steps
-            out.append({"type": "constraint", "split": split, "prompt": f"{fam}{p}", "seed": 0, "step": t,
+            out.append({"type": "constraint", "calibration": "fitted", "split": split, "prompt": f"{fam}{p}", "seed": 0, "step": t,
                         "sigma": 1 - t / 6, "bin": 1 + t // 2, "family": fam, "cid": 0, "tier": 3,
                         "gates": {"validity": act, "presence": True, "support": True, "domain": True,
                                   "confidence": True},
                         "active": act, "accepted": accepted if act else None, "dL": dl if act else None})
-        out.append({"type": "final", "split": split, "prompt": f"{fam}{p}", "seed": 0, "family": fam, "cid": 0,
+        out.append({"type": "final", "calibration": "fitted", "split": split, "prompt": f"{fam}{p}", "seed": 0, "family": fam, "cid": 0,
                     "tier": 3, "mu_unguided": 0.3, "mu_guided": 0.8})
     return out
 
@@ -34,7 +34,7 @@ def pairs(split, fam, slope, n=60, seed=0):
     out = []
     for i in range(n):
         ds = rng.uniform(0.1, 0.5)
-        out.append({"split": split, "prompt": f"{fam}{i // 3}", "family": fam, "ds": ds,
+        out.append({"calibration": "fitted", "split": split, "prompt": f"{fam}{i // 3}", "family": fam, "ds": ds,
                     "dy": slope * ds + rng.gauss(0, 0.01), "direction": 1, "mu_est": 0.8,
                     "human_accept": slope > 0.3, "n_active": 1 + i % 3, "conflict": False})
     return out
@@ -89,11 +89,11 @@ def main():
     assert t["B"]["exploitation"] == 1.0 and t["A"]["exploitation"] == 0.0
 
     # tier diagnostics: one accepted step raises tier-2 loss beyond tolerance -> finite-step failure
-    steps = [{"type": "step", "split": "sys", "prompt": "x", "step": 0, "tiers": [1, 2, 3],
+    steps = [{"type": "step", "calibration": "fitted", "split": "sys", "prompt": "x", "step": 0, "tiers": [1, 2, 3],
               "loss_before": {"1": 1.0, "2": 1.0, "3": 1.0}, "loss_after": {"1": 0.9, "2": 1.2, "3": 0.5},
               "cos": {"1-2": -0.3, "1-3": 0.1, "2-3": 0.2}, "removed": {"2": 0.4, "3": 0.0},
               "rejections": ["tier2"], "accepted": True, "eps": {"1": 0.0, "2": 0.1, "3": 0.0}},
-             {"type": "step", "split": "sys", "prompt": "x", "step": 1, "tiers": [1, 2, 3],
+             {"type": "step", "calibration": "fitted", "split": "sys", "prompt": "x", "step": 1, "tiers": [1, 2, 3],
               "loss_before": {"1": 0.9, "2": 1.0, "3": 0.5}, "loss_after": {"1": 0.8, "2": 0.9, "3": 0.4},
               "cos": {"1-2": 0.3, "1-3": 0.1, "2-3": -0.2}, "removed": {"2": 0.0, "3": 0.2},
               "rejections": [], "accepted": True, "eps": {"1": 0.0, "2": 0.1, "3": 0.0}}]
@@ -103,15 +103,15 @@ def main():
     assert abs(tr["rejections"]["rate"] - 1 / 3) < 1e-12
 
     # shift: in-domain reliability and out-of-domain share
-    sh = shift_rows([{"split": "sys", "family": "A", "source": s, "s": v, "rating": v, "accept": v > 0.5,
+    sh = shift_rows([{"calibration": "fitted", "split": "sys", "family": "A", "source": s, "s": v, "rating": v, "accept": v > 0.5,
                       "mu": float(v > 0.5), "in_domain": ind}
                      for s in ("unguided", "guided") for v, ind in ((0.1, True), (0.4, True), (0.7, True), (0.9, False))])
     assert sh[("A", "guided")]["spearman"] == 1.0 and abs(sh[("A", "guided")]["out_of_domain"] - 0.25) < 1e-12
 
     # interval comparison
-    iv = interval_rows([{"variant": "interval", "prompt": "p", "verdict": "ok", "unguided_verdict": "ok",
+    iv = interval_rows([{"calibration": "fitted", "variant": "interval", "prompt": "p", "verdict": "ok", "unguided_verdict": "ok",
                          "dy_ok": 0.0, "pair_correct": True, "nfe": 50, "seconds": 10},
-                        {"variant": "point", "prompt": "p", "verdict": "strong", "unguided_verdict": "ok",
+                        {"calibration": "fitted", "variant": "point", "prompt": "p", "verdict": "strong", "unguided_verdict": "ok",
                          "dy_ok": 0.3, "pair_correct": False, "nfe": 50, "seconds": 10}])
     assert iv["interval"]["ofa"] == 0.0 and iv["point"]["ofa"] == 1.0 and iv["point"]["over"] == 1.0
 

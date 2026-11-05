@@ -9,6 +9,7 @@ eval mode, so dropout and normalization behave as in inference.
 """
 from __future__ import annotations
 
+import gc
 import hashlib
 import os
 import sys
@@ -57,7 +58,7 @@ def _enable_checkpointing(transformer, vae):
 class Backend:
     def __init__(self, transformer, vae, cfg: float, shift: float, read_blocks: Sequence[int],
                  sar_blocks: Sequence[int], tf_device, vae_device, dtype, latent_size: int,
-                 encoder=None):
+                 encoder=None, defer_transformer=False):
         self.transformer, self.vae, self.cfg, self.shift = transformer.eval(), vae.eval(), cfg, shift
         self.read_blocks, self.sar_blocks = list(read_blocks), list(sar_blocks)
         self.tf_device, self.vae_device, self.dtype = torch.device(tf_device), torch.device(vae_device), dtype
@@ -65,6 +66,7 @@ class Backend:
         self.latent_dtype = torch.float64 if dtype == torch.float64 else torch.float32
         self.latent_size = latent_size
         self._encoder = encoder
+        self._deferred = defer_transformer  # T5 and the transformer do not fit on one T4 together
         self._text_cache: Dict[Tuple, TextCond] = {}
         for module in (transformer, vae):
             module.requires_grad_(False)
@@ -106,11 +108,17 @@ class Backend:
         if hasattr(self, "_pipe"):
             for name in ("text_encoder", "text_encoder_2", "text_encoder_3"):
                 setattr(self._pipe, name, None)
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        if self._deferred:
+            self.transformer.to(self.tf_device)
+            self._deferred = False
 
     # ------------------------------------------------------------------------------ velocity
     def _forward(self, z, sigma, embeds, pooled):
+        if self._deferred:
+            raise RuntimeError("encode all prompts, then call unload_text_encoders, before running the transformer")
         t = (sigma.to(self.tf_device, self.dtype) * 1000).reshape(1).repeat(z.shape[0])
         return self.transformer(hidden_states=z, encoder_hidden_states=embeds, pooled_projections=pooled,
                                 timestep=t, return_dict=False)[0]
@@ -191,13 +199,13 @@ def load_backend(model_id, read_blocks, sar_blocks=None, tf_device="cuda:0", vae
     from diffusers import StableDiffusion3Pipeline
     pipe = StableDiffusion3Pipeline.from_pretrained(model_id, torch_dtype=dtype)
     vae_device = vae_device or tf_device
-    pipe.transformer.to(tf_device)
     pipe.vae.to(vae_device)
     for enc in (pipe.text_encoder, pipe.text_encoder_2, pipe.text_encoder_3):
         enc.to(tf_device)
     backend = Backend(pipe.transformer, pipe.vae, cfg, pipe.scheduler.config.shift, read_blocks,
                       sar_blocks if sar_blocks is not None else read_blocks, tf_device, vae_device, dtype,
-                      resolution // pipe.vae_scale_factor, encoder=_pipeline_encoder(pipe, tf_device))
+                      resolution // pipe.vae_scale_factor, encoder=_pipeline_encoder(pipe, tf_device),
+                      defer_transformer=True)
     backend._pipe = pipe
     return backend
 
@@ -222,7 +230,7 @@ def _tiny_encoder(dt, n_t5=8):
     return encode
 
 
-def tiny_backend(seed: int = 0, read_blocks=(0, 1), sar_blocks=None) -> Backend:
+def tiny_backend(seed: int = 0, read_blocks=(0, 1), sar_blocks=None, defer_transformer=False) -> Backend:
     """Random 3-block transformer and 4-level VAE on CPU in float64; 16 latent -> 128 pixels."""
     torch.manual_seed(seed)
     dt = torch.float64
@@ -238,6 +246,6 @@ def tiny_backend(seed: int = 0, read_blocks=(0, 1), sar_blocks=None) -> Backend:
                         latent_channels=4, norm_num_groups=2, scaling_factor=1.5305, shift_factor=0.0609,
                         use_quant_conv=False, use_post_quant_conv=False).to(dt)
     b = Backend(tr, vae, 7.0, 3.0, read_blocks, sar_blocks if sar_blocks is not None else read_blocks, "cpu", "cpu",
-                dt, 16, encoder=_tiny_encoder(dt))
+                dt, 16, encoder=_tiny_encoder(dt), defer_transformer=defer_transformer)
     b.n_text = CLIP_TOKENS + 8
     return b

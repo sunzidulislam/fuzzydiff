@@ -52,9 +52,12 @@ def _check_selection(records: Iterable[dict]):
 
 
 def _check_fitted(records: Iterable[dict]):
+    """Only records tagged fitted, with nothing provisional behind them, can reach a table."""
     recs = list(records)
-    if any(r.get("calibration") == "provisional" for r in recs):
-        raise ProvisionalError("tables and selection may not read records from provisional calibration")
+    for r in recs:
+        if r.get("calibration") != "fitted" or r.get("provisional"):
+            raise ProvisionalError("tables and selection read only records from fully fitted calibration; "
+                                   f"got calibration={r.get('calibration')!r}, provisional={r.get('provisional')!r}")
     return recs
 
 
@@ -66,12 +69,13 @@ def read_jsonl(path):
 class StepLog:
     """Minimal writer used by the guidance loop."""
 
-    def __init__(self, path, split, calibration):
-        self.f, self.split, self.calibration = open(path, "a"), split, calibration
+    def __init__(self, path, split, calibration, provisional=lambda: ()):
+        self.f, self.split, self.calibration, self.provisional = open(path, "a"), split, calibration, provisional
 
     def write(self, **rec):
         rec["split"] = self.split
         rec["calibration"] = self.calibration
+        rec["provisional"] = sorted(self.provisional())
         self.f.write(json.dumps(rec) + "\n")
 
     def close(self):

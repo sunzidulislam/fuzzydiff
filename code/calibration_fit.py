@@ -411,10 +411,9 @@ class FittedCalibration:
     acceptance data uses `fallback_intervals` (manuscript's pre-registered heuristic intervals), and
     each such use is recorded in `heuristic_used` so it can be reported separately."""
 
-    tag = "fitted"
-
     def __init__(self, parts, size_quantile_models: Optional[SizeQuantiles] = None):
         self.parts = parts
+        self.tag = "provisional" if parts.get("provisional_parts") else "fitted"
         self.size_models = size_quantile_models
         self.heuristic_used = set()
         self._phi = {f: {q: {b: PhiMap.from_dict(d) for b, d in bins.items()} for q, bins in qs.items()}
@@ -468,7 +467,9 @@ class FittedCalibration:
         return (a["kappa_pk"], a["m_min"], a["tau_min"])
 
     def presence_logit(self, bin, global_logit, region_logit):
-        p = self.parts["presence"][str(bin)]
+        p = self.parts.get("presence", {}).get(str(bin))
+        if p is None:
+            return torch.full_like(global_logit, float("nan"))   # not fitted: out of domain, below the gate
         return p["w_global"] * global_logit + p["w_region"] * region_logit + p["bias"]
 
     def size_quantiles(self, features):

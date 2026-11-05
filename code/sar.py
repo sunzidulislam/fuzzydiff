@@ -53,6 +53,8 @@ class Stage2Out:
     fallback_objects: Set[str] = field(default_factory=set)
     suspended_steps: int = 0
     passes: int = 0
+    bias_steps: int = 0
+    no_op_reason: Optional[str] = None
     latents: List[torch.Tensor] = field(default_factory=list)
     sar_free: List[torch.Tensor] = field(default_factory=list)
 
@@ -144,6 +146,7 @@ def stratum(a) -> str:
 
 def drift_ok(s_now, s_ref, thresholds) -> bool:
     theta, delta_rel = thresholds
+    s_ref = s_ref.to(s_now.device, s_now.dtype)
     a = float(area(s_ref))
     shift = float(torch.linalg.norm(centroid(s_now) - centroid(s_ref)))
     return float(soft_iou(s_now, s_ref)) >= theta and shift <= delta_rel * math.sqrt(a / math.pi)
@@ -151,11 +154,12 @@ def drift_ok(s_now, s_ref, thresholds) -> bool:
 
 def _strengths(cfg, priors, attr_of, traces, supports, presence):
     alpha, beta, weak = {}, {}, set()
-    for q in priors:
+    for q, m in priors.items():
         gamma = 1.0
         if cfg.confidence:
             head = q.split("#")[0]
-            gamma = float((presence or {}).get(head, 1.0)) * float(soft_iou(_resize(traces[q], supports[head].shape).to(supports[head].dtype), supports[head]))
+            trace = _resize(traces[q], supports[head].shape).to(supports[head].dtype) if q in traces else m
+            gamma = float((presence or {}).get(head, 1.0)) * float(soft_iou(trace, supports[head]))
             if gamma < cfg.gamma_min:
                 weak.add(q)
         alpha[q], beta[q] = cfg.alpha * gamma, cfg.beta * gamma
@@ -179,6 +183,21 @@ def _attribute_regressed(stage1, x, program, calib, measure, backend) -> bool:
         if float(membership(score(f, evidence, calib), f.low, f.high, f.kappa)) < 0.5:
             return True
     return False
+
+
+def _no_op_reason(objects_ok, priors, out, cond):
+    """Why a SAR run applied no bias: it looks like a success, so it must say so."""
+    if not objects_ok:
+        return "attention_failed"
+    if not priors:
+        return "no_priors"
+    if not any(q in cond.phrase_tokens for q in priors):
+        return "no_tokens"
+    if out.fallback_objects >= set(priors):
+        return "no_thresholds"
+    if out.suspended_steps and not out.disabled:
+        return "suspended"
+    return "all_disabled"
 
 
 @torch.no_grad()
@@ -213,8 +232,9 @@ def run_stage2(backend, stage1, cond, program, prompt, calib, seg, cfg: SarCfg, 
     for q, ref in refs.items():
         if calib.drift_thresholds(stratum(area(ref))) is None:
             out.fallback_objects.add(q)
-        elif q not in weak:
+        elif q not in weak and q in cond.phrase_tokens:
             enabled.add(q)
+    checked = set(refs) - out.fallback_objects
     n_text = cond.embeds.shape[1]
     heads = sorted({q.split("#")[0] for q in refs})
 
@@ -273,14 +293,17 @@ def run_stage2(backend, stage1, cond, program, prompt, calib, seg, cfg: SarCfg, 
         out.sar_free.append(z0_next.clone())
         z = z + step * v
         previous_q = q_k
+        out.bias_steps += bool(q_k)
         log.write(type="sar_step", prompt=prompt, seed=seed, step=k, sigma=float(sigma), mode=mode, enabled=sorted(q_k),
                   rollback=rollback, suspended=suspended)
 
     out.latent = z
     image = backend.decode(z)
     out.image = image
-    if active_mode and refs:
-        if failing(image, set(refs)):
+    if mode == "sar" and out.bias_steps == 0:
+        out.no_op_reason = _no_op_reason(objects_ok, object_priors, out, cond)
+    if active_mode and checked:
+        if failing(image, checked):
             out.used_fallback, out.fallback_reason = True, "spatial"
         elif measure is not None and _attribute_regressed(stage1, image, program, calib, measure, backend):
             out.used_fallback, out.fallback_reason = True, "attribute"
@@ -288,5 +311,6 @@ def run_stage2(backend, stage1, cond, program, prompt, calib, seg, cfg: SarCfg, 
             out.image = stage1.image
     log.write(type="sar_final", prompt=prompt, seed=seed, mode=mode, used_fallback=out.used_fallback,
               fallback_reason=out.fallback_reason, rollbacks=out.rollbacks, disabled=sorted(out.disabled),
-              fallback_objects=sorted(out.fallback_objects), suspended_steps=out.suspended_steps, passes=out.passes)
+              fallback_objects=sorted(out.fallback_objects), suspended_steps=out.suspended_steps, passes=out.passes,
+              bias_steps=out.bias_steps, no_op_reason=out.no_op_reason)
     return out

@@ -63,7 +63,7 @@ def _blur(lab, sigma):
     if sigma <= 0:
         return lab
     r = int(math.ceil(3 * sigma))
-    xs = torch.arange(-r, r + 1, dtype=lab.dtype)
+    xs = torch.arange(-r, r + 1, dtype=lab.dtype, device=lab.device)
     k = torch.exp(-xs ** 2 / (2 * sigma ** 2))
     k = k / k.sum()
     x = lab.unsqueeze(0)
@@ -78,9 +78,9 @@ def trimmed_mean(lab, w, trim=0.1, temp=0.02):
     ww = w.flatten()
     with torch.no_grad():
         order = torch.argsort(L)
-        cw = torch.cumsum(ww[order], 0) / ww.sum()
-        lo = L[order][torch.searchsorted(cw, torch.tensor(trim, dtype=cw.dtype)).clamp(max=len(L) - 1)]
-        hi = L[order][torch.searchsorted(cw, torch.tensor(1 - trim, dtype=cw.dtype)).clamp(max=len(L) - 1)]
+        cw = torch.cumsum(ww[order], 0) / ww.sum().clamp_min(1e-12)
+        lo = L[order][torch.searchsorted(cw, torch.tensor(trim, dtype=cw.dtype, device=cw.device)).clamp(max=len(L) - 1)]
+        hi = L[order][torch.searchsorted(cw, torch.tensor(1 - trim, dtype=cw.dtype, device=cw.device)).clamp(max=len(L) - 1)]
     wt = ww * torch.sigmoid((L - lo) / temp) * torch.sigmoid((hi - L) / temp)
     return (lab.reshape(3, -1) * wt).sum(1) / (wt.sum() + 1e-8)
 
@@ -99,11 +99,12 @@ def _weights(lb, w, trim=0.1, temp=0.02):
     the blurred L held fixed), normalized to sum to one. Used by EVERY F6 statistic."""
     L = lb[0].flatten()
     ww = w.flatten()
-    if trim > 0:
+    core = ww > ww.max() * 1e-3            # quantiles describe the object's core, not a tiny weight elsewhere
+    if trim > 0 and core.any():
         with torch.no_grad():
-            lo, hi = torch.quantile(L[ww > 0], trim), torch.quantile(L[ww > 0], 1 - trim)
+            lo, hi = torch.quantile(L[core], trim), torch.quantile(L[core], 1 - trim)
         ww = ww * torch.sigmoid((L - lo) / temp) * torch.sigmoid((hi - L) / temp)
-    return ww / ww.sum()
+    return ww / ww.sum().clamp_min(1e-12)
 
 
 def mixture_stats(lab, w, c1, c2, sigma_p=2.0, trim=0.1, eps=1e-6):

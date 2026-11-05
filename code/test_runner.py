@@ -284,6 +284,18 @@ def test_summary_and_blind_page():
     with_tmp(body)
 
 
+class FullySet:
+    """Settings as they will be once the YAML holds every run value, with nothing provisional behind them."""
+
+    provisional_used = frozenset()
+
+    def __init__(self, settings):
+        self.settings = settings
+
+    def get(self, *a, **k):
+        return self.settings.get(*a, **k)
+
+
 def _ratings_csv(path, n_per_item=3, bad_checks=0):
     lines = ["worker,item,rating,check"]
     for item in ("a", "b"):
@@ -358,11 +370,14 @@ def _synthetic_inputs(tmp):
     for r in list(rows["ratings"]):
         for i in range(60):
             e = rng.uniform(0, 100)
-            extra.append({**r, "e": e, "rating": e / 100, "base": f"synthetic{i}"})
+            extra.append({**r, "e": e, "rating": e / 100, "base": f"synthetic{i}", "item": f"s{len(extra)}"})
     rows["ratings"] += extra
     rows["acceptance"] = [{"family": "F2a", "quantity": "scene_lightness", "hedge": "None", "orientation": 1,
                            "s": s, "accept": int(0.6 <= s <= 0.8), "base": f"b{i % 40}"}
                           for i, s in enumerate(rng.uniform(0, 1) for _ in range(800))]
+    rows.update(prototypes={"red": [0.6, 0.2, 0.1]}, bounds={"e": [0.4, 0.1]}, leakage_scale=0.08, psi=1.0,
+                size=[{"A_q": 0.1 * (i % 5 + 1), "A_r": 0.05, "abs_error": 0.1, "bin": 4, "estimate": i, "human": i, "base": f"b{i}"}
+                      for i in range(60)])
     return rows
 
 
@@ -373,8 +388,10 @@ def test_synthetic_annotations_to_fitted_run():
         fit_main(tmp / "input.json", tmp / "calibration.json", SETTINGS, min_images=50)
         calib = FittedCalibration.load(tmp / "calibration.json")
         assert calib.valid("F2a", 4)
+        assert calib.tag == "fitted"
         d = deps()
         d.calib = calib
+        d.settings = FullySet(SETTINGS)
         s = run_jobs(jobs(), d, tmp / "out")
         assert s.done == 2 and s.failed == 0, s.failures
         guided = Job("stage1", "a room", 0, "dev", "m1_eval", program())

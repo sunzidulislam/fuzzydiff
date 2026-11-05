@@ -16,7 +16,7 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from activation_schedule import bin_of  # noqa: E402
-from constraints import (charbonnier, freeze_step, in_domain, membership, new_state, score, scorer_for,  # noqa: E402
+from constraints import (Evidence, charbonnier, freeze_step, in_domain, membership, new_state, score, scorer_for,  # noqa: E402
                          tier_losses, violation)
 
 BINS = 4
@@ -37,6 +37,7 @@ class GuideCfg:
     eps_g: float = 1e-8
     guided: bool = True
     c_sigma: float = 1.0
+    log_all: bool = False                   # also measure and log steps without guidance (calibration runs)
     state_kw: Dict[str, float] = field(default_factory=dict)
 
 
@@ -145,6 +146,12 @@ def _measure(ctx, z, sigma, b, readout):
     return out, ctx.measure(ctx.backend, x0, out, ctx.program, b)
 
 
+def _light_evidence(evidence):
+    """What a finished step keeps: detached attention for the trace, and no gradient graph."""
+    attention = {k: {**a, "P": a["P"].detach()} for k, a in evidence.attention.items()}
+    return Evidence(attention=attention)
+
+
 def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
     """One guided step (Alg. guided_step). Falls back to the plain Euler update on any failure."""
     cfg, b = ctx.cfg, _bin(sigma)
@@ -159,14 +166,17 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
     plain_next = _euler(z, sigma, sigma_next, v_plain)
     before_terms = _constraint_losses(frozen, evidence, ctx.calib)
     before = _floats(losses)
+    raw_fields = [_raw_fields(f, evidence) for f in frozen]
+    attention_fields = _attention_fields(evidence)
     rejections, cos, removed = [], {}, {}
-    accepted, n_tried, z_used, v_used, used_evidence = None, 0, z, v_plain, evidence
+    accepted, n_tried, z_used, v_used, used_evidence = None, 0, z, v_plain, _light_evidence(evidence)
     after: Dict[str, float] = {}
     after_terms: Dict = {}
 
     if not losses:
         rejections.append("no_active")
         accepted = False
+        del out, evidence
     else:
         tiers = sorted(losses)
         raw = {}
@@ -177,18 +187,20 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
             g, = torch.autograd.grad(losses[m], leaf, retain_graph=k < len(tiers) - 1, allow_unused=True)
             raw[m] = torch.zeros_like(leaf) if g is None else g
         total = sum(losses.values()).detach()
-        del out, losses
-        for a in tiers:
-            for c in tiers:
-                if a < c and raw[a].norm() > 0 and raw[c].norm() > 0:
-                    cos[f"{a}-{c}"] = float(_dot(raw[a], raw[c]) / (raw[a].double().norm() * raw[c].double().norm()))
+        del out, losses, evidence                   # free the graph before the candidate passes
+        finite = all(torch.isfinite(raw[m]).all() for m in tiers)
         g = torch.zeros_like(leaf)
-        for m in tiers:
-            projected = project_tier(raw[m], [raw[h] for h in tiers if h < m])
-            norm = raw[m].double().norm()
-            removed[str(m)] = float(1 - projected.double().norm() / norm) if norm > 0 else 0.0
-            g = g + projected
-        if not torch.isfinite(g).all():
+        if finite:
+            for a in tiers:
+                for c in tiers:
+                    if a < c and raw[a].norm() > 0 and raw[c].norm() > 0:
+                        cos[f"{a}-{c}"] = float(_dot(raw[a], raw[c]) / (raw[a].double().norm() * raw[c].double().norm()))
+            for m in tiers:
+                projected = project_tier(raw[m], [raw[h] for h in tiers if h < m])
+                norm = raw[m].double().norm()
+                removed[str(m)] = float(1 - projected.double().norm() / norm) if norm > 0 else 0.0
+                g = g + projected
+        if not finite:
             rejections.append("nonfinite")
             accepted = False
         elif float(g.double().norm()) < cfg.g_min:
@@ -205,7 +217,7 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
                     out_c, ev_c = _measure(ctx, candidate, sigma, b, readout)
                 reason = _reject_reason(frozen, ev_c, ctx.calib, before, cfg)
                 if reason is None:
-                    accepted, z_used, v_used, used_evidence = True, candidate, out_c.v.detach(), ev_c
+                    accepted, z_used, v_used, used_evidence = True, candidate, out_c.v.detach(), _light_evidence(ev_c)
                     after = _floats(tier_losses(frozen, ev_c, ctx.calib))
                     after_terms = _constraint_losses(frozen, ev_c, ctx.calib)
                     break
@@ -213,7 +225,7 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
                 eta /= 2
 
     _log_step(ctx, step, sigma, b, frozen, accepted, before, after, cos, removed, rejections,
-              before_terms, after_terms, evidence)
+              before_terms, after_terms, raw_fields, attention_fields)
     latent_next = plain_next if accepted is not True else _euler(z_used, sigma, sigma_next, v_used)
     return StepOut(z, latent_next.detach(), sigma, sigma_next, v_plain, z_used, accepted, rejections, n_tried,
                    used_evidence)
@@ -238,8 +250,8 @@ def _raw_fields(f, evidence):
     """Raw inputs at this step, so calibration can later fit each noise bin (App. "Data")."""
     c = f.constraint
     fields = {"raw": _raw(f, evidence), "quantity": ":".join(c.quantity) if isinstance(c.quantity, tuple) else c.quantity}
-    if c.family == "presence" and c.args[0] in evidence.objects:
-        obj = evidence.objects[c.args[0]]
+    obj = evidence.objects.get(c.args[0], {}) if c.args else {}
+    if c.family == "presence" and "g" in obj:
         fields.update(object=c.args[0], **{"global": float(obj["g"]), "region": float(obj["r"])})
     if c.family == "F8":
         objs = [evidence.objects.get(q) for q in c.args]
@@ -259,18 +271,31 @@ def _attention_fields(evidence):
 
 
 def _log_step(ctx, step, sigma, b, frozen, accepted, before, after, cos, removed, rejections, before_terms, after_terms,
-              evidence):
-    for f in frozen:
+              raw_fields, attention_fields):
+    for f, fields in zip(frozen, raw_fields):
         key = (f.cid, f.component)
         ctx.log.write(type="constraint", prompt=ctx.prompt, seed=ctx.seed, step=step, sigma=float(sigma), bin=b,
                       family=f.constraint.family, cid=f.cid, component=f.component, tier=f.tier, gates=f.gates,
                       active=f.weight > 0, accepted=accepted if f.weight > 0 else None,
                       dL=after_terms[key] - before_terms[key] if key in after_terms and key in before_terms else None,
-                      **_raw_fields(f, evidence))
+                      **fields)
     ctx.log.write(type="step", prompt=ctx.prompt, seed=ctx.seed, step=step, sigma=float(sigma),
-                  attention=_attention_fields(evidence), tiers=sorted({f.tier for f in frozen if f.weight > 0}), loss_before=before,
+                  attention=attention_fields, tiers=sorted({f.tier for f in frozen if f.weight > 0}), loss_before=before,
                   loss_after=after or before, cos=cos, removed=removed, rejections=rejections,
                   accepted=bool(accepted), eps={str(m): e for m, e in ctx.cfg.eps.items()})
+
+
+def _log_unguided_step(ctx, z, sigma, step):
+    """Raw estimator values of a step without guidance, for calibration (App. "Data"). Returns its velocity."""
+    b = _bin(sigma)
+    out, evidence = _measure(ctx, z, sigma, b, bool(ctx.cond.phrase_tokens))
+    ctx.state.step = step
+    frozen = freeze_step(ctx.program, evidence, ctx.calib, b, ctx.state, ctx.targets)
+    for f in frozen:
+        ctx.log.write(type="constraint", prompt=ctx.prompt, seed=ctx.seed, step=step, sigma=float(sigma), bin=b,
+                      family=f.constraint.family, cid=f.cid, component=f.component, tier=f.tier, gates=f.gates,
+                      active=False, accepted=None, dL=None, **_raw_fields(f, evidence))
+    return out.v
 
 
 def _accumulate_trace(sums, counts, evidence):
@@ -290,7 +315,9 @@ def score_image(program, measure, backend, calib, x, state, targets=None):
             continue                        # attention needs a backbone pass; the final image has none
         ok = in_domain(f, evidence, calib)
         s = score(f, evidence, calib) if ok else None
-        records.append({"family": f.constraint.family, "cid": f.cid, "component": f.component, "tier": f.tier,
+        c = f.constraint
+        records.append({"family": c.family, "cid": f.cid, "component": f.component, "tier": f.tier,
+                        "quantity": ":".join(c.quantity) if isinstance(c.quantity, tuple) else c.quantity,
                         "s": float(s.detach()) if ok else None, "low": f.low, "high": f.high,
                         "mu": float(membership(s, f.low, f.high, f.kappa).detach()) if ok else 0.0,
                         "raw": _raw(f, evidence)})
@@ -317,13 +344,11 @@ def run_stage1(backend, program, cond, seed, calib, measure, cfg: GuideCfg, log,
             _accumulate_trace(sums, counts, out.evidence)
         else:
             with torch.no_grad():
-                readout = bool(cond.phrase_tokens)
-                if readout:
-                    o, ev = _measure(ctx, z, sigma, _bin(sigma), True)
-                    _accumulate_trace(sums, counts, ev)
+                if cfg.log_all:
+                    v = _log_unguided_step(ctx, z, sigma, i)
                 else:
-                    o = backend.velocity(z, sigma, cond, cfg=cfg.cfg)
-                z = _euler(z, sigma, sigma_next, o.v)
+                    v = backend.velocity(z, sigma, cond, cfg=cfg.cfg).v
+                z = _euler(z, sigma, sigma_next, v)
     state.step = cfg.steps
     with torch.no_grad():
         image = backend.decode(z)

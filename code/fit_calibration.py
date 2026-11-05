@@ -25,11 +25,21 @@ from calibration_fit import (FittedCalibration, contiguous, cross_fit, fit_gamma
                              validity_flags, _auroc)
 from color_stats import srgb_to_oklab  # noqa: E402
 from prompts import base_prompt  # noqa: E402
-from reporting import cluster_bootstrap, ece, read_jsonl, spearman  # noqa: E402
+from reporting import LeakageError, cluster_bootstrap, ece, read_jsonl, spearman  # noqa: E402
 from settings import load_settings  # noqa: E402
 
 BINS = ("1", "2", "3", "4")
 EPS = 1e-6
+
+
+def _is_perceptual(r):
+    """Only a score with a perceptual map: F6's upper bounds are native quantities, not degrees."""
+    return r["family"] not in ("presence", "binding", "leakage", "F8") and r.get("component", "main") == "main"
+
+
+def _n_images(rows):
+    """Validity counts images, not per-step rows."""
+    return len({r.get("item", i) for i, r in enumerate(rows)})
 
 
 def rows_from_run(run_dir, ratings=None, presence_labels=None, masks=None):
@@ -39,21 +49,29 @@ def rows_from_run(run_dir, ratings=None, presence_labels=None, masks=None):
     for log_path in Path(run_dir).glob("*/*/log.jsonl"):
         item = f"{log_path.parts[-3]}/{log_path.parts[-2]}"
         with open(log_path.parent / "meta.json") as f:
-            base = base_prompt(json.load(f)["prompt"])
+            meta = json.load(f)
+        if "failed" in meta:
+            continue
+        base = base_prompt(meta["prompt"])
         human = masks.get(item, {})
         for r in read_jsonl(log_path):
-            if r["type"] == "constraint" and r.get("raw") is not None:
-                if item in ratings and r["family"] not in ("presence", "binding", "leakage", "F8"):
+            if r.get("split") == "test":
+                raise LeakageError(f"fitting may not read test records: {item}")
+            if r["type"] == "final" and r.get("raw") is not None and item in ratings and _is_perceptual(r):
+                out["ratings"].append({"family": r["family"], "quantity": r.get("quantity"), "bin": r["bin"],
+                                       "e": r["raw"], "rating": ratings[item], "base": base, "item": item})
+            elif r["type"] == "constraint" and r.get("raw") is not None:
+                if item in ratings and _is_perceptual(r):
                     out["ratings"].append({"family": r["family"], "quantity": r.get("quantity"), "bin": r["bin"],
-                                           "e": r["raw"], "rating": ratings[item], "base": base})
+                                           "e": r["raw"], "rating": ratings[item], "base": base, "item": item})
                 if r["family"] == "presence" and r.get("object") in presence_labels.get(item, {}):
                     out["presence"].append({"bin": r["bin"], "global": r["global"], "region": r["region"],
-                                            "label": presence_labels[item][r["object"]], "base": base})
+                                            "label": presence_labels[item][r["object"]], "base": base, "item": item})
                 if r["family"] == "F8" and r.get("objects", [None])[0] in human and r["objects"][1] in human:
                     a, b = human[r["objects"][0]], human[r["objects"][1]]
                     m_human = r["orientation"] * (np.log(a.mean() + EPS) - np.log(b.mean() + EPS))
                     out["size"].append({"A_q": r["areas"][0], "A_r": r["areas"][1], "bin": r["bin"], "estimate": r["raw"],
-                                        "human": float(m_human), "abs_error": abs(r["raw"] - float(m_human)), "base": base})
+                                        "human": float(m_human), "abs_error": abs(r["raw"] - float(m_human)), "base": base, "item": item})
             elif r["type"] == "step":
                 for phrase, a in r.get("attention", {}).items():
                     head = phrase.split("#")[0]
@@ -93,7 +111,7 @@ def _fit_perceptual(rows, s, min_images):
                      "rating": r["rating"], "base": r["base"]} for r in test]
 
         oof = cross_fit(cell, fit, predict)
-        cells[family].setdefault(quantity, {})[b] = {"n": len(cell), "rho_lb": _spearman_lb(oof, "pred", "rating")}
+        cells[family].setdefault(quantity, {})[b] = {"n": _n_images(cell), "rho_lb": _spearman_lb(oof, "pred", "rating")}
         phi.setdefault(family, {}).setdefault(quantity, {})[b] = fit(cell).to_dict()
     for family, per_quantity in cells.items():
         flags_all = {b: True for b in BINS}
@@ -103,7 +121,7 @@ def _fit_perceptual(rows, s, min_images):
             for b in BINS:
                 flags_all[b] = flags_all[b] and flags.get(b, False)
         valid[family] = contiguous(flags_all)
-    return phi, valid
+    return phi, valid, {f: dict(q) for f, q in cells.items()}
 
 
 def _fit_presence_section(rows, s, min_images):
@@ -115,12 +133,22 @@ def _fit_presence_section(rows, s, min_images):
         arrays = ([r["global"] for r in cell], [r["region"] for r in cell], [r["label"] for r in cell], [r["base"] for r in cell])
         if len(set(arrays[2])) < 2:
             continue
-        model = fit_presence(*arrays)
-        models[b] = model.to_dict()
-        p = torch.sigmoid(model.logit(torch.tensor(arrays[0], dtype=torch.float64),
-                                      torch.tensor(arrays[1], dtype=torch.float64))).tolist()
-        stats[b] = {"n": len(cell), "npos": sum(arrays[2]), "nneg": len(cell) - sum(arrays[2]),
-                    "auc_lb": _auroc(p, arrays[2]), "ece_ub": ece(p, arrays[2])}
+        models[b] = fit_presence(*arrays).to_dict()
+
+        def fit(train):
+            return fit_presence([r["global"] for r in train], [r["region"] for r in train], [r["label"] for r in train],
+                                [r["base"] for r in train])
+
+        def predict(model, test):
+            return [{"p": float(torch.sigmoid(torch.tensor(model.logit(r["global"], r["region"])))), "label": r["label"],
+                     "base": r["base"]} for r in test]
+
+        oof = cross_fit(cell, fit, predict)
+        auc_lb, _ = cluster_bootstrap(oof, lambda rs: _auroc([r["p"] for r in rs], [r["label"] for r in rs]), key="base", n=300)
+        _, ece_ub = cluster_bootstrap(oof, lambda rs: ece([r["p"] for r in rs], [r["label"] for r in rs]), key="base", n=300)
+        images = {r.get("item", i): r["label"] for i, r in enumerate(cell)}
+        stats[b] = {"n": len(images), "npos": sum(images.values()), "nneg": len(images) - sum(images.values()),
+                    "auc_lb": auc_lb, "ece_ub": ece_ub}
     flags = validity_flags(stats, min_images, s.get("cfgNposMin"), s.get("cfgRhoMin"), s.get("cfgAUCMin"), s.get("cfgECEMax"))
     return models, contiguous({b: flags.get(b, False) for b in BINS})
 
@@ -186,10 +214,15 @@ def fit_main(input_path, out_path, settings=None, min_images=None):
     parts["bounds"].update(data.get("bounds", {}))
     if "leakage_scale" in data:
         parts["leakage_scale"] = data["leakage_scale"]
+    if "psi" in data:
+        parts["psi"] = data["psi"]
+    parts["provisional_parts"] = [k for k in ("prototypes", "bounds", "leakage_scale", "psi", "size") if k not in data]
+    parts["phi"], parts["cells"] = {}, {}
     if data.get("ratings"):
-        parts["phi"], parts["valid"] = _fit_perceptual(data["ratings"], s, n_min)
-    else:
-        parts["phi"] = {}
+        parts["phi"], parts["valid"], parts["cells"] = _fit_perceptual(data["ratings"], s, n_min)
+    if data.get("leakage_cells"):
+        flags = validity_flags(data["leakage_cells"], n_min, s.get("cfgNposMin"), s.get("cfgRhoMin"), s.get("cfgAUCMin"), s.get("cfgECEMax"))
+        parts["valid"]["leakage"] = contiguous({b: flags.get(b, False) for b in BINS})
     if data.get("presence"):
         parts["presence"], parts["valid"]["presence"] = _fit_presence_section(data["presence"], s, n_min)
     if data.get("acceptance"):
@@ -202,7 +235,7 @@ def fit_main(input_path, out_path, settings=None, min_images=None):
         by_bin = defaultdict(list)
         for r in rows:
             by_bin[str(r["bin"])].append(r)
-        stats = {b: {"n": len(c), "rho_lb": _spearman_lb(c, "estimate", "human")} for b, c in by_bin.items()}
+        stats = {b: {"n": _n_images(c), "rho_lb": _spearman_lb(c, "estimate", "human")} for b, c in by_bin.items()}
         flags = validity_flags(stats, n_min, s.get("cfgNposMin"), s.get("cfgRhoMin"), s.get("cfgAUCMin"), s.get("cfgECEMax"))
         parts["valid"]["F8"] = contiguous({b: flags.get(b, False) for b in BINS})
     if data.get("attention_rows"):
@@ -221,6 +254,8 @@ def fit_main(input_path, out_path, settings=None, min_images=None):
     if data.get("stage2_cells"):
         flags = validity_flags(data["stage2_cells"], n_min, s.get("cfgNposMin"), s.get("cfgRhoMin"), s.get("cfgAUCMin"), s.get("cfgECEMax"))
         parts["stage2_valid"] = {b: flags.get(b, False) for b in BINS}
+    parts["not_valid"] = sorted(f for f in ("F2a", "F6", "F8", "presence", "binding", "leakage")
+                                if not any(parts["valid"].get(f, {}).values()))
     calib = FittedCalibration(parts, models)
     calib.save(out_path)
     return calib
@@ -232,7 +267,8 @@ def main():
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     calib = fit_main(args.input, args.out)
-    print(json.dumps({"valid": calib.parts["valid"], "drift": calib.parts["drift"],
+    print(json.dumps({"tag": calib.tag, "provisional_parts": calib.parts["provisional_parts"],
+                      "not_valid": calib.parts["not_valid"], "valid": calib.parts["valid"], "drift": calib.parts["drift"],
                       "attention": calib.parts["attention"], "binding_ok": calib.parts["binding_ok"]}, indent=1))
 
 

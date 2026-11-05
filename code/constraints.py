@@ -353,8 +353,11 @@ def in_domain(f: Frozen, evidence, calib) -> bool:
 def tier_losses(frozen: List[Frozen], evidence, calib) -> Dict[int, torch.Tensor]:
     """L^(m) = sum lambda_k L_k over positively weighted constraints of each tier."""
     losses: Dict[int, torch.Tensor] = {}
+    device = None                           # attention and estimators may live on different GPUs
     for f in frozen:
         if f.weight > 0:
             term = f.weight * charbonnier(violation(score(f, evidence, calib), f.low, f.high), f.kappa)
+            device = term.device if device is None else device
+            term = term.to(device)
             losses[f.tier] = losses[f.tier] + term if f.tier in losses else term
     return losses

@@ -38,12 +38,12 @@ from calibration import ProvisionalCalibration  # noqa: E402
 from calibration_fit import FittedCalibration  # noqa: E402
 from constraints import new_state  # noqa: E402
 from estimators import ClipSegSupport, FakeSigLIP, FakeSupport, SigLIPEvidence  # noqa: E402
-from grounding import phrase_spans  # noqa: E402
-from guidance import GuideCfg, Stage1Out, run_stage1, score_image  # noqa: E402
+from grounding import missing_phrases, phrase_spans  # noqa: E402
+from guidance import BINS, GuideCfg, Stage1Out, run_stage1, score_image  # noqa: E402
 from measure import EstimatorDeps, Measure, measure_scene  # noqa: E402
 from predicates import Constraint, Program, translate  # noqa: E402
 from prompts import enumerate_suite, select  # noqa: E402
-from reporting import StepLog  # noqa: E402
+from reporting import LeakageError, StepLog  # noqa: E402
 from sar import SarCfg, build_priors, run_stage2  # noqa: E402
 from sd3_backend import load_backend, tiny_backend  # noqa: E402
 from settings import load_settings  # noqa: E402
@@ -94,6 +94,29 @@ class Summary:
     failures: List[str] = field(default_factory=list)
 
 
+def check_test_run(group, calibration_tag, manifest) -> None:
+    """Test images exist only after every selection decision is frozen (paper: App. no_leakage)."""
+    if group != "test":
+        return
+    if calibration_tag != "fitted":
+        raise LeakageError("test images need fully fitted calibration")
+    if manifest is None or not Path(manifest).exists():
+        raise LeakageError("test images need a frozen support manifest: run freeze_manifest.py first")
+
+
+def peak_memory() -> Dict[str, float]:
+    """Peak allocated GiB per GPU: the transformer and the estimators can sit on different ones."""
+    if not torch.cuda.is_available():
+        return {}
+    return {f"cuda:{i}": torch.cuda.max_memory_allocated(i) / 2 ** 30 for i in range(torch.cuda.device_count())}
+
+
+def _reset_peaks():
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            torch.cuda.reset_peak_memory_stats(i)
+
+
 def image_id(prompt: str, seed: int) -> str:
     return f"{hashlib.sha256(prompt.encode()).hexdigest()[:12]}_s{seed}"
 
@@ -118,11 +141,13 @@ def placebo_source(job: Job, jobs: List[Job]) -> Optional[Job]:
 
 
 def _is_finished(path: Path) -> bool:
-    meta = path / "meta.json"
-    if not meta.exists():
+    """Finished means complete metadata and, unless the job was skipped, its image."""
+    try:
+        with open(path / "meta.json") as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
         return False
-    with open(meta) as f:
-        return "failed" not in json.load(f)
+    return "failed" not in meta and ("skipped" in meta or (path / "image.png").exists())
 
 
 def _save_image(image, path):
@@ -131,7 +156,7 @@ def _save_image(image, path):
 
 
 def _peak_gb():
-    return torch.cuda.max_memory_allocated() / 2 ** 30 if torch.cuda.is_available() else float("nan")
+    return max(peak_memory().values(), default=float("nan"))
 
 
 def _with_overrides(cfg: GuideCfg, overrides) -> GuideCfg:
@@ -152,8 +177,9 @@ def _final_records(job, finals, base_finals, log):
     for f in finals:
         guided = f["mu"]
         unguided = guided if base_finals is None else by_key.get((f["cid"], f["component"]), float("nan"))
-        log.write(type="final", prompt=job.prompt, seed=job.seed, family=f["family"], cid=f["cid"],
-                  component=f["component"], tier=f["tier"], mu_unguided=unguided, mu_guided=guided, s=f["s"])
+        log.write(type="final", prompt=job.prompt, seed=job.seed, family=f["family"], cid=f["cid"], bin=BINS,
+                  component=f["component"], tier=f["tier"], mu_unguided=unguided, mu_guided=guided, s=f["s"],
+                  raw=f.get("raw"), quantity=f.get("quantity"))
 
 
 def _cond(job: Job, deps: Deps):
@@ -185,10 +211,23 @@ def _placebo_priors(job, deps, out, cond):
     other = _load_stage1(out, source.prompt, source.seed, deps.backend)
     built = build_priors(other.traces, other.supports, deps.sar_cfg)
     priors = {}
-    for mine, theirs in zip(job.program.objects, source.program.objects):
+    mine_keys = _object_keys(job.program.objects, cond.phrase_tokens)
+    their_keys = _object_keys(source.program.objects, built)
+    for mine, theirs in zip(mine_keys, their_keys):
         if theirs in built:
             priors[mine] = built[theirs]
     return priors, source.prompt
+
+
+def _object_keys(objects, known):
+    """Phrase key of each object in order: its name, or name#i when the object is repeated."""
+    seen: Dict[str, int] = {}
+    keys = []
+    for head in objects:
+        i = seen.get(head, 0)
+        seen[head] = i + 1
+        keys.append(head if head in known else f"{head}#{i}")
+    return keys
 
 
 def _run_stage2_arm(job, deps, out, tmp, meta, cond, measure, log):
@@ -205,7 +244,7 @@ def _run_stage2_arm(job, deps, out, tmp, meta, cond, measure, log):
     meta.update(finals=finals, used_fallback=result.used_fallback, fallback_reason=result.fallback_reason,
                 rollbacks=result.rollbacks, disabled=sorted(result.disabled),
                 fallback_objects=sorted(result.fallback_objects), suspended_steps=result.suspended_steps,
-                passes=result.passes,
+                passes=result.passes, bias_steps=result.bias_steps, no_op_reason=result.no_op_reason,
                 renoised_sha=hashlib.sha256(result.renoised.detach().cpu().numpy().tobytes()).hexdigest()[:16])
     return result.image, finals
 
@@ -238,12 +277,12 @@ def _execute(job: Job, deps: Deps, out: Path, tmp: Path) -> dict:
         base_finals = base["finals"] if base else None
 
     cond = _cond(job, deps)
-    meta["unmapped"] = cond.unmapped
+    meta["unmapped"] = cond.unmapped + (missing_phrases(job.prompt, job.program) if deps.measure_factory else [])
     measure = deps.measure_factory(job.prompt, cond) if deps.measure_factory else deps.measure
-    log = StepLog(str(tmp / "log.jsonl"), job.split, deps.calib.tag)
+    log = StepLog(str(tmp / "log.jsonl"), job.split, deps.calib.tag,
+                  lambda: set(deps.settings.provisional_used) | set(getattr(deps.calib, "heuristic_used", ())))
     start = time.perf_counter()
-    if torch.cuda.is_available():
-        torch.cuda.reset_peak_memory_stats()
+    _reset_peaks()
     try:
         if job.arm in STAGE2_MODES:
             image, finals = _run_stage2_arm(job, deps, out, tmp, meta, cond, measure, log)
@@ -257,7 +296,7 @@ def _execute(job: Job, deps: Deps, out: Path, tmp: Path) -> dict:
     finally:
         log.close()
     _save_image(image, tmp / "image.png")
-    meta.update(finals=finals, time_s=time.perf_counter() - start, peak_gb=_peak_gb())
+    meta.update(finals=finals, time_s=time.perf_counter() - start, peak_gb=_peak_gb(), peak_by_gpu=peak_memory())
     if "ds" in meta:
         meta["dy"] = finals[0]["s"] - base_finals[0]["s"]
     return meta
@@ -300,7 +339,9 @@ def run_jobs(jobs: List[Job], deps: Deps, out, resume_from=None) -> Summary:
         rel = Path(job.arm) / image_id(job.prompt, job.seed)
         if resume_from is not None and not (out / rel).exists() and _is_finished(Path(resume_from) / rel):
             (out / rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(Path(resume_from) / rel, out / rel)
+            tmp = out / f".tmp-{uuid.uuid4().hex}"
+            shutil.copytree(Path(resume_from) / rel, tmp)
+            os.replace(tmp, out / rel)
         if _is_finished(out / rel):
             summary.skipped += 1
         else:
@@ -320,17 +361,25 @@ def run_jobs(jobs: List[Job], deps: Deps, out, resume_from=None) -> Summary:
 
 
 def merge_logs(out_dir, into) -> int:
-    """Concatenate per-image logs of every published image; returns the number of records."""
+    """Concatenate per-image logs of every finished image; returns the number of records."""
     n = 0
     with open(into, "w") as dest:
         for log in sorted(Path(out_dir).glob("*/*/log.jsonl")):
-            if log.parts[-3].startswith("."):
+            if log.parts[-3].startswith(".") or _failed(log.parent):
                 continue
             with open(log) as f:
                 for line in f:
                     dest.write(line)
                     n += 1
     return n
+
+
+def _failed(path: Path) -> bool:
+    try:
+        with open(path / "meta.json") as f:
+            return "failed" in json.load(f)
+    except (OSError, ValueError):
+        return True
 
 
 def summarize_arms(out_dir) -> Dict[str, dict]:
@@ -352,6 +401,7 @@ def summarize_arms(out_dir) -> Dict[str, dict]:
                     "fallback_rate": mean([{"x": float(bool(r.get("used_fallback")))} for r in done], "x"),
                     "rollbacks": mean(done, "rollbacks"), "suspended_steps": mean(done, "suspended_steps"),
                     "disabled": mean([{"x": len(r.get("disabled", []))} for r in done], "x"),
+                    "no_bias_share": mean([{"x": float(r["bias_steps"] == 0)} for r in done if "bias_steps" in r], "x"),
                     "passes": mean(done, "passes"), "time_s": mean(done, "time_s"), "peak_gb": mean(done, "peak_gb")}
     return out
 
@@ -441,11 +491,15 @@ def main():
     ap.add_argument("--tiny", action="store_true", help="smoke test on the tiny random model (CPU)")
     ap.add_argument("--limit", type=int, default=None, help="only the first N jobs")
     ap.add_argument("--calibration", default=None, help="fitted calibration file; provisional values if omitted")
+    ap.add_argument("--manifest", default=None, help="frozen support manifest; required for --group test")
+    ap.add_argument("--log-all-steps", action="store_true", help="log raw values at every step (calibration runs)")
     args = ap.parse_args()
 
     s = load_settings()
     cfg, sar = guide_cfg(s), sar_cfg(s)
     calib = FittedCalibration.load(args.calibration) if args.calibration else ProvisionalCalibration(s)
+    check_test_run(args.group, calib.tag, args.manifest)
+    cfg = dataclasses.replace(cfg, log_all=args.log_all_steps)
     if args.tiny:
         backend = tiny_backend()
         cfg = dataclasses.replace(cfg, steps=2)

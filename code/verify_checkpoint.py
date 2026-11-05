@@ -29,6 +29,7 @@ Smoke test of all code paths without weights (CPU, tiny random transformer):
     python -I verify_checkpoint.py --tiny
 """
 import argparse
+import gc
 import json
 import os
 import sys
@@ -111,6 +112,13 @@ def backbone_config(args, pipe, tr):
     return cfg
 
 
+def del_text_encoders(pipe):
+    """T5 and the transformer do not fit on one T4 together; every later check reuses the embeddings."""
+    pipe.text_encoder = pipe.text_encoder_2 = pipe.text_encoder_3 = None
+    gc.collect()
+    torch.cuda.empty_cache()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="stabilityai/stable-diffusion-3-medium-diffusers")
@@ -139,7 +147,9 @@ def main():
     else:
         from diffusers import StableDiffusion3Pipeline
         dev, dt = torch.device("cuda"), torch.bfloat16
-        pipe = StableDiffusion3Pipeline.from_pretrained(args.model, torch_dtype=dt).to(dev)
+        pipe = StableDiffusion3Pipeline.from_pretrained(args.model, torch_dtype=dt)
+        for encoder in (pipe.text_encoder, pipe.text_encoder_2, pipe.text_encoder_3):
+            encoder.to(dev)
         tr = pipe.transformer
         in_ch = tr.config.in_channels
         vae_f = pipe.vae_scale_factor
@@ -168,6 +178,9 @@ def main():
         res["qk_norm"] = getattr(tr.transformer_blocks[0].attn, "norm_q", None) is not None
         res["mode"] = f"{args.model}, {args.res}^2, bf16"
         res["backbone_config"] = backbone_config(args, pipe, tr)
+        del_text_encoders(pipe)
+        tr.to(dev)
+        pipe.vae.to(dev)
     tr.eval()
     for p_ in tr.parameters():
         p_.requires_grad_(False)
@@ -251,8 +264,9 @@ def main():
         for factory in (lambda i: JointAttnProcessor2_0(), lambda i: FuzzyJointAttnProcessor()):
             set_procs(tr, factory)
             g = torch.Generator(device=dev).manual_seed(0)
-            im = pipe(args.prompt, num_inference_steps=args.steps, guidance_scale=7.0, height=args.res,
-                      width=args.res, generator=g, output_type="np").images[0]
+            im = pipe(prompt_embeds=pe, negative_prompt_embeds=npe, pooled_prompt_embeds=pp,
+                      negative_pooled_prompt_embeds=npp, num_inference_steps=args.steps, guidance_scale=7.0,
+                      height=args.res, width=args.res, generator=g, output_type="np").images[0]
             imgs.append(torch.from_numpy(im))
         res["image_identity"] = f"{(imgs[0] - imgs[1]).abs().max().item() * 255:.1f}"
     else:

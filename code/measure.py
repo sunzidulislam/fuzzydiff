@@ -18,8 +18,6 @@ from constraints import Evidence, mix_key  # noqa: E402
 from estimators import area, centroid, erode_core, extent, object_photometric, region_crop, scene_lightness  # noqa: E402
 from grounding import aggregate_maps, binding, binding_keys  # noqa: E402
 
-EPS_W = 1e-8
-
 
 def measure_scene(backend, x0, out, program, bin):
     """Scene-level evidence only (M1): no segmentation or attention."""
@@ -79,7 +77,7 @@ class Measure:
 
     def _weights(self, core, lab):
         w = F.interpolate(core.detach()[None, None], size=lab.shape[-2:], mode="bilinear", align_corners=False)[0, 0]
-        return w.to(lab.dtype) + EPS_W
+        return w.to(lab.dtype)
 
     def _prototype(self, term, lab):
         return self.deps.calib.prototype(term).to(lab.device, lab.dtype)
