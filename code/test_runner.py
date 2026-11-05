@@ -21,8 +21,8 @@ from guidance import GuideCfg, run_stage1  # noqa: E402
 from estimators import FakeSigLIP, FakeSupport  # noqa: E402
 from measure import EstimatorDeps, Measure, measure_scene  # noqa: E402
 from predicates import Constraint, Program, translate  # noqa: E402
-from run_experiment import (Deps, Job, arm_jobs, commanded_targets, image_id, m1_jobs, merge_logs, placebo_source,  # noqa: E402
-                            run_jobs, summarize_arms)
+from run_experiment import (Deps, Job, arm_jobs, commanded_targets, describe_program, image_id, m1_jobs, merge_logs,  # noqa: E402
+                            placebo_source, prompt_rows, run_jobs, summarize_arms)
 from sar import SarCfg  # noqa: E402
 from sd3_backend import tiny_backend  # noqa: E402
 from settings import load_settings  # noqa: E402
@@ -282,6 +282,26 @@ def test_summary_and_blind_page():
         key = json.load(open(tmp / "c.key.json"))
         assert all(set(v.values()) == {"stage1", "stage1_plain", "stage1_sar", "stage1_placebo"} for v in key.values())
     with_tmp(body)
+
+
+def test_own_prompt_runs_through_every_stage():
+    def body(tmp):
+        prompt = "a red mug and a blue teapot"
+        rows = prompt_rows([prompt])
+        assert rows[0].prompt == prompt and rows[0].group == "dev" and rows[0].suite == "custom"
+        s = run_jobs(arm_jobs(rows, (0,), ["unguided", "stage1", "stage1_sar"]), four_arm_deps(), tmp)
+        assert s.done == 3 and s.failed == 0, s.failures
+        for arm in ("unguided", "stage1", "stage1_sar"):
+            assert (tmp / arm / image_id(prompt, 0) / "image.png").exists()
+    with_tmp(body)
+
+
+def test_describe_program_says_what_will_and_will_not_be_guided():
+    text = describe_program("a slightly red mug and a few fast cars")
+    assert "not guided" in text.lower()
+    guided = describe_program("a slightly dark mug on a wooden table")
+    assert "F2a" in guided and "presence" in guided and "slightly" in guided
+    assert "F9" in describe_program("a mug left of a teapot") and "not guided" in describe_program("a mug left of a teapot")
 
 
 class FullySet:

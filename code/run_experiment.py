@@ -12,6 +12,7 @@ Usage:
   python -I code/run_experiment.py --suite m1_eval --out outputs/m1 [--resume-from DIR] [--vae-device cuda:1]
   python -I code/run_experiment.py --suite mixture --group dev --n 20 --out outputs/sar
   python -I code/run_experiment.py --suite mixture --group dev --n 2 --tiny --out outputs/smoke
+  python -I code/run_experiment.py --prompt "a slightly red mug and a blue teapot" --out outputs/mine
 """
 from __future__ import annotations
 
@@ -36,13 +37,13 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from calibration import ProvisionalCalibration  # noqa: E402
 from calibration_fit import FittedCalibration  # noqa: E402
-from constraints import new_state  # noqa: E402
+from constraints import FAMILY_SCORERS, new_state  # noqa: E402
 from estimators import ClipSegSupport, FakeSigLIP, FakeSupport, SigLIPEvidence  # noqa: E402
 from grounding import missing_phrases, phrase_spans  # noqa: E402
 from guidance import BINS, GuideCfg, Stage1Out, run_stage1, score_image  # noqa: E402
 from measure import EstimatorDeps, Measure, measure_scene  # noqa: E402
 from predicates import Constraint, Program, translate  # noqa: E402
-from prompts import enumerate_suite, select  # noqa: E402
+from prompts import PromptRow, base_prompt, enumerate_suite, select  # noqa: E402
 from reporting import LeakageError, StepLog  # noqa: E402
 from sar import SarCfg, build_priors, run_stage2  # noqa: E402
 from sd3_backend import load_backend, tiny_backend  # noqa: E402
@@ -456,6 +457,29 @@ def arm_jobs(rows, seeds, arms) -> List[Job]:
     return jobs
 
 
+def prompt_rows(prompts) -> List[PromptRow]:
+    """Your own prompts: development data, never part of any calibration or test group."""
+    return [PromptRow(p, base_prompt(p), "dev", "custom") for p in prompts]
+
+
+def describe_program(prompt: str) -> str:
+    """What the pipeline understood from a prompt, and what it will not guide."""
+    program = translate(prompt)
+    lines = [f"Prompt: {prompt}", f"Objects: {', '.join(program.objects) or 'none found'}"]
+    if program.degraded:
+        lines.append("Outside the grammar: the pipeline only checks that objects appear.")
+    not_guided = list(program.unsupported)
+    for c in program.constraints:
+        text = f"  {c.family} {c.args}" + (f" hedge={c.hedge}" if c.hedge else "") + (f" {c.quantity}" if c.quantity else "")
+        if c.family in FAMILY_SCORERS:
+            lines.append(text)
+        else:
+            not_guided.append(text.strip())
+    if not_guided:
+        lines.append("Recognized but not guided: " + "; ".join(map(str, not_guided)))
+    return "\n".join(lines)
+
+
 def guide_cfg(s) -> GuideCfg:
     return GuideCfg(steps=s.get("cfgSteps", int), cfg=s.get("cfgCFG"), sigma_lo=s.get("cfgSigmaLo"),
                     eta0=s.get("cfgEtaZero"), delta=s.get("cfgDelta"), dmax=s.get("cfgMaxPert"),
@@ -480,7 +504,8 @@ def _tiny_estimators():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--suite", required=True, choices=["m1_tune", "m1_eval", "plain_color", "mixture", "size", "soft"])
+    ap.add_argument("--suite", choices=["m1_tune", "m1_eval", "plain_color", "mixture", "size", "soft"])
+    ap.add_argument("--prompt", action="append", help="your own prompt instead of a suite; can be repeated")
     ap.add_argument("--out", required=True)
     ap.add_argument("--group", default="dev")
     ap.add_argument("--n", type=int, default=20, help="prompts per suite (suites other than M1)")
@@ -501,6 +526,12 @@ def main():
     ap.add_argument("--manifest", default=None, help="frozen support manifest; required for --group test")
     ap.add_argument("--log-all-steps", action="store_true", help="log raw values at every step (calibration runs)")
     args = ap.parse_args()
+    if bool(args.suite) == bool(args.prompt):
+        ap.error("give either --suite or --prompt")
+    if args.prompt and args.arms == ap.get_default("arms"):
+        args.arms = "unguided,stage1,stage1_sar"    # a placebo needs another image, so it is left out here
+    for prompt in args.prompt or []:
+        print(describe_program(prompt))
 
     s = load_settings()
     cfg, sar = guide_cfg(s), sar_cfg(s)
@@ -514,11 +545,11 @@ def main():
     else:
         backend = load_backend(args.model, s.get("cfgReadBlocks", list), s.get("cfgSARBlocks", list), args.tf_device,
                                args.vae_device, getattr(torch, args.dtype), s.get("cfgCFG"), args.resolution, getattr(torch, args.vae_dtype))
-    if args.suite.startswith("m1"):
+    if args.suite and args.suite.startswith("m1"):
         jobs = m1_jobs(args.suite == "m1_tune")
         deps = Deps(backend, calib, measure_scene, cfg, s, unload_text=not args.tiny)
     else:
-        rows = select(args.suite, args.group, args.n)
+        rows = prompt_rows(args.prompt) if args.prompt else select(args.suite, args.group, args.n)
         jobs = arm_jobs(rows, [int(x) for x in args.seeds.split(",")], args.arms.split(","))
         if args.tiny:
             seg, siglip = _tiny_estimators()
