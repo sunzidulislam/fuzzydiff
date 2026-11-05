@@ -128,7 +128,10 @@ def scorer_for(c: Constraint) -> Optional[Scorer]:
 
 
 def _inside(raw, lo, hi):
-    return raw is not None and bool(torch.isfinite(torch.as_tensor(raw))) and lo <= float(raw) <= hi
+    if raw is None:
+        return False
+    value = torch.as_tensor(raw).detach()
+    return bool(torch.isfinite(value)) and lo <= float(value) <= hi
 
 
 def freeze_step(program, evidence, calib, bin, state: StepState, targets=None) -> List[Frozen]:
@@ -154,7 +157,7 @@ def freeze_step(program, evidence, calib, bin, state: StepState, targets=None) -
                 low, high = targets[cid]
             weight = 0.0
             if all(gates.values()):
-                dom = 1.0 if math.isinf(lo) or math.isinf(hi) else domain_weight(raw, lo, hi, state.band)
+                dom = 1.0 if math.isinf(lo) or math.isinf(hi) else domain_weight(torch.as_tensor(raw).detach(), lo, hi, state.band)
                 since = state.first_valid[c.family]
                 ramp = 1.0 if since == state.first_step else ramp_weight(state.step - since, state.ramp)
                 weight = state.lam * dom * ramp * _support_weight(c, evidence)

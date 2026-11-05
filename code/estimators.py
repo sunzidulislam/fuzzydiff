@@ -25,8 +25,11 @@ def pool_grid(x, size=64):
 
 
 def srgb_to_cielab(x):
-    """sRGB -> CIELAB (D65), differentiable everywhere (both power laws have linear toes)."""
-    x = _chw(x).clamp(0, 1)
+    """sRGB -> CIELAB (D65), differentiable everywhere (both power laws have linear toes).
+
+    No clamp here: Backend.decode already clamps with a straight-through gradient, and a second
+    clamp would zero the gradient of saturated pixels."""
+    x = _chw(x)
     lin = torch.where(x <= 0.04045, x / 12.92, ((x.clamp_min(0.04045) + 0.055) / 1.055) ** 2.4)
     m = torch.as_tensor(_RGB_TO_XYZ, dtype=x.dtype, device=x.device)
     xyz = torch.einsum("ij,jhw->ihw", m, lin)

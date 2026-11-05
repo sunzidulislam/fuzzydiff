@@ -66,6 +66,8 @@ class Backend:
         self.transformer, self.vae, self.cfg, self.shift = transformer.eval(), vae.eval(), cfg, shift
         self.read_blocks, self.sar_blocks = list(read_blocks), list(sar_blocks)
         self.tf_device, self.vae_device, self.dtype = torch.device(tf_device), torch.device(vae_device), dtype
+        # Paper: bf16 weights, fp32 estimator outputs, losses, and updates.
+        self.latent_dtype = torch.float64 if dtype == torch.float64 else torch.float32
         self.latent_size = latent_size
         self._encoder = encoder
         self._text_cache: Dict[Tuple, TextCond] = {}
@@ -88,7 +90,7 @@ class Backend:
 
     def noise_like_latent(self, seed: int) -> torch.Tensor:
         g = torch.Generator("cpu").manual_seed(int(seed))
-        z = torch.randn(1, self.in_channels, self.latent_size, self.latent_size, generator=g, dtype=self.dtype)
+        z = torch.randn(1, self.in_channels, self.latent_size, self.latent_size, generator=g, dtype=self.latent_dtype)
         return z.to(self.tf_device)
 
     # ------------------------------------------------------------------------------ text
@@ -137,6 +139,7 @@ class Backend:
         v = self._forward(z.to(self.tf_device, self.dtype).repeat(2, 1, 1, 1), sigma,
                           torch.cat([cond.embeds, cond.uncond_embeds]),
                           torch.cat([cond.pooled, cond.uncond_pooled]))
+        v = v.to(z.device, z.dtype)
         v_cond, v_uncond = v[:1], v[1:]
         out = VelocityOut(v=v_uncond + w * (v_cond - v_uncond), v_cond=v_cond, v_uncond=v_uncond)
         if readout and cond.phrase_tokens:
@@ -151,7 +154,7 @@ class Backend:
     def velocity_cond(self, z, sigma, cond: TextCond, sar_log_r: torch.Tensor) -> torch.Tensor:
         """Conditional branch only, with the SAR logit bias (paper App. B, pass 2 of a Stage-2 step)."""
         self._configure(sar_log_r=sar_log_r.to(self.tf_device, self.dtype))
-        return self._forward(z.to(self.tf_device, self.dtype), sigma, cond.embeds, cond.pooled)
+        return self._forward(z.to(self.tf_device, self.dtype), sigma, cond.embeds, cond.pooled).to(z.device, z.dtype)
 
     @staticmethod
     def clean(z, sigma, v):
@@ -162,14 +165,14 @@ class Backend:
         """[1, 3, H, W] in [0, 1]; the clamp passes gradients straight through."""
         c = self.vae.config
         x = self.vae.decode(z0.to(self.vae_device, self.dtype) / c.scaling_factor + c.shift_factor).sample
-        x = (x + 1) / 2
+        x = ((x + 1) / 2).to(self.latent_dtype)
         return x + (x.clamp(0, 1) - x).detach()
 
     def encode(self, x) -> torch.Tensor:
         """Deterministic (posterior mode), so every Stage-2 arm starts from the same latent."""
         c = self.vae.config
         h = self.vae.encode(2 * x.to(self.vae_device, self.dtype) - 1).latent_dist.mode()
-        return ((h - c.shift_factor) * c.scaling_factor).to(self.tf_device)
+        return ((h - c.shift_factor) * c.scaling_factor).to(self.tf_device, self.latent_dtype)
 
 
 # ---------------------------------------------------------------------------------- real checkpoint
