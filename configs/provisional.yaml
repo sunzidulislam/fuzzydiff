@@ -40,6 +40,7 @@ psi: 1.0
 binding_kappa: 0.05
 leakage_max: 0.25
 leakage_kappa: 0.1
+leakage_tau: 0.08
 f6_e_max: 0.5
 f6_varpi_max: 0.5
 f6_zeta_max: 0.25
@@ -75,3 +76,10 @@ prototypes:
   coral-orange: [0.95, 0.50, 0.26]
   bluish-purple: [0.31, 0.22, 0.72]
   pinkish-white: [0.95, 0.85, 0.88]
+  reddish-brown: [0.55, 0.27, 0.20]
+  yellowish-green: [0.60, 0.75, 0.20]
+  bluish-green: [0.10, 0.60, 0.50]
+  grayish-blue: [0.40, 0.50, 0.65]
+  orange-red: [0.90, 0.30, 0.10]
+  purple-pink: [0.75, 0.35, 0.65]
+  yellowish-orange: [0.95, 0.65, 0.12]

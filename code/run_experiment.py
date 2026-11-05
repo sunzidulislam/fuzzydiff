@@ -31,6 +31,7 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from calibration import ProvisionalCalibration  # noqa: E402
+from grounding import phrase_spans  # noqa: E402
 from guidance import GuideCfg, run_stage1  # noqa: E402
 from measure import measure_scene  # noqa: E402
 from predicates import Constraint, Program, translate  # noqa: E402
@@ -65,6 +66,7 @@ class Deps:
     settings: object
     stage1: Callable = run_stage1
     unload_text: bool = False
+    measure_factory: Optional[Callable] = None     # (prompt, cond) -> measure; needs phrase readout
 
 
 @dataclass
@@ -127,6 +129,11 @@ def _final_records(job, finals, base_finals, log):
                   component=f["component"], tier=f["tier"], mu_unguided=unguided, mu_guided=guided, s=f["s"])
 
 
+def _cond(job: Job, deps: Deps):
+    spans = phrase_spans(job.prompt, job.program) if deps.measure_factory else None
+    return deps.backend.encode_prompt(job.prompt, spans)
+
+
 def _execute(job: Job, deps: Deps, out: Path, tmp: Path) -> dict:
     """Run one job into tmp; returns its metadata."""
     meta = {"arm": job.arm, "prompt": job.prompt, "seed": job.seed, "split": job.split, "suite": job.suite,
@@ -154,13 +161,15 @@ def _execute(job: Job, deps: Deps, out: Path, tmp: Path) -> dict:
         base = _read_meta(out, "ladder_unguided", job)
         base_finals = base["finals"] if base else None
 
-    cond = deps.backend.encode_prompt(job.prompt)
+    cond = _cond(job, deps)
+    meta["unmapped"] = cond.unmapped
+    measure = deps.measure_factory(job.prompt, cond) if deps.measure_factory else deps.measure
     log = StepLog(str(tmp / "log.jsonl"), job.split, deps.calib.tag)
     start = time.perf_counter()
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     try:
-        result = deps.stage1(deps.backend, job.program, cond, job.seed, deps.calib, deps.measure, cfg, log,
+        result = deps.stage1(deps.backend, job.program, cond, job.seed, deps.calib, measure, cfg, log,
                              targets=targets, prompt=job.prompt)
         _final_records(job, result.finals, base_finals, log)
     finally:
@@ -212,7 +221,7 @@ def run_jobs(jobs: List[Job], deps: Deps, out, resume_from=None) -> Summary:
         else:
             pending.append(job)
     for job in pending:
-        deps.backend.encode_prompt(job.prompt)
+        _cond(job, deps)
     if deps.unload_text:
         deps.backend.unload_text_encoders()
     for job in pending:

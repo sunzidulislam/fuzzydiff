@@ -257,6 +257,8 @@ def _finals(ctx, x0, b):
     evidence = ctx.measure(ctx.backend, x0, None, ctx.program, b)
     records = []
     for f in freeze_step(ctx.program, evidence, ctx.calib, b, ctx.state, ctx.targets):
+        if f.constraint.family == "binding":
+            continue                        # attention needs a backbone pass; the final image has none
         ok = in_domain(f, evidence, ctx.calib)
         s = score(f, evidence, ctx.calib) if ok else None
         records.append({"family": f.constraint.family, "cid": f.cid, "component": f.component, "tier": f.tier,
