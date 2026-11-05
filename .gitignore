@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Environments
+.venv*/
+
+# Tooling / scratch
+.worktrees/
+.superpowers/
+
+# Outputs
+outputs/
+attention_results
+docs
+
+# Carried-over project tree (tracked on refactor/repository-structure, not here)
+fuzzydiff/
+pipeline_fuzzy/
+tests/
+REVIEW.md
