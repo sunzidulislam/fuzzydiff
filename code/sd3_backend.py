@@ -20,8 +20,8 @@ from diffusers import AutoencoderKL, FlowMatchEulerDiscreteScheduler, SD3Transfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fuzzydiff_sd3_attention import FuzzyJointAttnProcessor  # noqa: E402
+from grounding import CLIP_TOKENS, map_tokens  # noqa: E402
 
-CLIP_TOKENS = 77
 T5_TOKENS = 256
 
 
@@ -34,6 +34,7 @@ class TextCond:
     valid_text: List[int]
     phrase_tokens: Dict[str, List[int]]
     t5_offsets: List[Tuple[int, int]]
+    unmapped: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -44,12 +45,6 @@ class VelocityOut:
     maps: Dict[str, Dict[int, torch.Tensor]] = field(default_factory=dict)
     shares: Dict[str, Dict[int, torch.Tensor]] = field(default_factory=dict)
     text_mass: Dict[int, torch.Tensor] = field(default_factory=dict)
-
-
-def spans_to_tokens(offsets, spans):
-    """Indices in the packed text sequence of the T5 tokens overlapping each character span."""
-    return {p: [CLIP_TOKENS + j for j, (a, b) in enumerate(offsets) if b > a and a < e and b > s]
-            for p, (s, e) in spans.items()}
 
 
 def _enable_checkpointing(transformer, vae):
@@ -101,7 +96,7 @@ class Backend:
             if self._encoder is None:
                 raise RuntimeError(f"prompt not cached and text encoders are unloaded: {prompt!r}")
             cond = self._encoder(prompt)
-            cond.phrase_tokens = spans_to_tokens(cond.t5_offsets, phrases)
+            cond.phrase_tokens, cond.unmapped = map_tokens(cond.t5_offsets, phrases, T5_TOKENS)
             self._text_cache[key] = cond
             self.n_text = cond.embeds.shape[1]
         return self._text_cache[key]
