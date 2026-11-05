@@ -35,6 +35,7 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from calibration import ProvisionalCalibration  # noqa: E402
+from calibration_fit import FittedCalibration  # noqa: E402
 from constraints import new_state  # noqa: E402
 from estimators import ClipSegSupport, FakeSigLIP, FakeSupport, SigLIPEvidence  # noqa: E402
 from grounding import phrase_spans  # noqa: E402
@@ -439,11 +440,12 @@ def main():
     ap.add_argument("--dtype", default="bfloat16", choices=["bfloat16", "float16", "float32"])
     ap.add_argument("--tiny", action="store_true", help="smoke test on the tiny random model (CPU)")
     ap.add_argument("--limit", type=int, default=None, help="only the first N jobs")
+    ap.add_argument("--calibration", default=None, help="fitted calibration file; provisional values if omitted")
     args = ap.parse_args()
 
     s = load_settings()
     cfg, sar = guide_cfg(s), sar_cfg(s)
-    calib = ProvisionalCalibration(s)
+    calib = FittedCalibration.load(args.calibration) if args.calibration else ProvisionalCalibration(s)
     if args.tiny:
         backend = tiny_backend()
         cfg = dataclasses.replace(cfg, steps=2)

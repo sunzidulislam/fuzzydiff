@@ -7,6 +7,7 @@ until the ratings are exported.
 from __future__ import annotations
 
 import base64
+import csv
 import hashlib
 import html
 import io
@@ -15,9 +16,11 @@ import os
 import random
 import sys
 from pathlib import Path
+from collections import defaultdict
 from typing import List
 
-from PIL import Image
+import numpy as np
+from PIL import Image, ImageDraw
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from reporting import slope_through_origin  # noqa: E402
@@ -160,3 +163,91 @@ def score_m1(ratings: Path, key: Path, out_dir: Path, settings) -> dict:
     return {"pairs": n, "skipped": skipped, "failed": failed, "dir_accuracy": accuracy, "transfer_slope": slope,
             "human_direction_agreement": agreement, "human_pairs": len(human), "broken_share": broken_share,
             "passed": bool(passed), "note": "pilot only: author ratings and provisional calibration"}
+
+
+MIN_RATINGS = 3
+GRID = 64
+
+
+def _anonymize(out_dir, seed):
+    """(anonymous id, image path) in shuffled order; the key maps ids back to arm/image."""
+    images = sorted(Path(out_dir).glob("*/*/image.png"))
+    random.Random(seed).shuffle(images)
+    return [(hashlib.sha256(f"{seed}|{n}".encode()).hexdigest()[:10], path) for n, path in enumerate(images)]
+
+
+def _write_key(pairs, path):
+    with open(path, "w") as f:
+        json.dump({anon: "/".join(p.parts[-3:-1]) for anon, p in pairs}, f, indent=1)
+
+
+def export_rating_tasks(out_dir, task, out_csv, ratings_per_item=MIN_RATINGS, attention_checks=0.05, seed=0) -> None:
+    """Task list for a rating platform. Attention checks repeat an item with a stated answer."""
+    pairs = _anonymize(out_dir, seed)
+    rng = random.Random(seed)
+    out_csv = Path(out_csv)
+    with open(out_csv, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["item", "image", "task", "ratings_needed", "check"])
+        for anon, path in pairs:
+            w.writerow([anon, f"{anon}.jpg", task, ratings_per_item, ""])
+        for n in range(max(1, round(attention_checks * len(pairs)))):
+            anon, _ = rng.choice(pairs)
+            w.writerow([f"check{n}", f"{anon}.jpg", "attention check: move the slider to 90", ratings_per_item, "check"])
+    _write_key(pairs, out_csv.with_suffix(".key.json"))
+    images = out_csv.parent / (out_csv.stem + "_images")
+    images.mkdir(exist_ok=True)
+    for anon, path in pairs:
+        Image.open(path).convert("RGB").save(images / f"{anon}.jpg", quality=95)
+
+
+def export_mask_tasks(out_dir, out_json, seed=0) -> None:
+    """Label Studio task list over anonymized copies of the images."""
+    pairs = _anonymize(out_dir, seed)
+    out_json = Path(out_json)
+    images = out_json.parent / (out_json.stem + "_images")
+    images.mkdir(exist_ok=True)
+    tasks = []
+    for anon, path in pairs:
+        Image.open(path).convert("RGB").save(images / f"{anon}.png")
+        with open(path.parent / "meta.json") as f:
+            objects = sorted({f_["family"] for f_ in json.load(f).get("finals", [])})
+        tasks.append({"data": {"image": f"{images.name}/{anon}.png", "item": anon}, "meta": {"families": objects}})
+    with open(out_json, "w") as f:
+        json.dump(tasks, f, indent=1)
+    _write_key(pairs, out_json.with_suffix(".key.json"))
+
+
+def import_ratings(path) -> List[dict]:
+    """Rows of workers who passed every attention check; each item needs at least 3 such ratings."""
+    with open(path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    failed = {r["worker"] for r in rows if r.get("check") == "fail"}
+    kept = [r for r in rows if r["worker"] not in failed and not r.get("check")]
+    counts = defaultdict(int)
+    for r in kept:
+        counts[r["item"]] += 1
+    short = sorted(i for i, n in counts.items() if n < MIN_RATINGS)
+    if short:
+        raise ValueError(f"items with fewer than {MIN_RATINGS} valid ratings: {short[:10]}")
+    return [{"item": r["item"], "worker": r["worker"], "rating": float(r["rating"]), "n": counts[r["item"]]} for r in kept]
+
+
+def import_masks(path, grid=GRID) -> dict:
+    """Label Studio polygon export -> {item: {label: grid x grid binary mask}}. Points are percentages."""
+    with open(path) as f:
+        tasks = json.load(f)
+    out = {}
+    for task in tasks:
+        masks = {}
+        for annotation in task.get("annotations", []):
+            for shape in annotation.get("result", []):
+                value = shape["value"]
+                label = value["polygonlabels"][0]
+                canvas = Image.new("L", (grid * 4, grid * 4), 0)
+                points = [(x / 100 * grid * 4, y / 100 * grid * 4) for x, y in value["points"]]
+                ImageDraw.Draw(canvas).polygon(points, fill=255)
+                small = np.asarray(canvas.resize((grid, grid), Image.BILINEAR), dtype=float) / 255
+                masks[label] = np.maximum(masks.get(label, 0), (small > 0.5).astype(float))
+        out[task["data"]["item"]] = masks
+    return out

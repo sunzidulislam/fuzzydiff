@@ -37,6 +37,7 @@ size_c68: 0.1
 size_c95: 0.2
 theta_drift: 0.5
 psi: 1.0
+attention_required: 0.8
 binding_kappa: 0.05
 leakage_max: 0.25
 leakage_kappa: 0.1

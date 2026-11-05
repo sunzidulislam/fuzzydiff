@@ -1,6 +1,7 @@
 """Tests of run_experiment.py and annotate.py on the tiny model (python -I test_runner.py)."""
 import json
 import os
+import random as random_module
 import shutil
 import sys
 import tempfile
@@ -10,7 +11,11 @@ import torch
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from annotate import build_comparison_page, build_rating_page, score_m1  # noqa: E402
+from annotate import (build_comparison_page, build_rating_page, export_mask_tasks, export_rating_tasks,  # noqa: E402
+                      import_masks, import_ratings, score_m1)
+from calibration_fit import FittedCalibration  # noqa: E402
+from fit_calibration import fit_main, rows_from_run  # noqa: E402
+from reporting import read_jsonl, tier_rows  # noqa: E402
 from calibration import ProvisionalCalibration  # noqa: E402
 from guidance import GuideCfg, run_stage1  # noqa: E402
 from estimators import FakeSigLIP, FakeSupport  # noqa: E402
@@ -277,6 +282,115 @@ def test_summary_and_blind_page():
         key = json.load(open(tmp / "c.key.json"))
         assert all(set(v.values()) == {"stage1", "stage1_plain", "stage1_sar", "stage1_placebo"} for v in key.values())
     with_tmp(body)
+
+
+def _ratings_csv(path, n_per_item=3, bad_checks=0):
+    lines = ["worker,item,rating,check"]
+    for item in ("a", "b"):
+        for w in range(n_per_item):
+            lines.append(f"w{w},{item},{50 + w},")
+    for w in range(n_per_item):
+        lines.append(f"w{w},check1,90,pass")
+    for b in range(bad_checks):
+        lines.append(f"bad{b},a,5,")
+        lines.append(f"bad{b},check1,1,fail")
+    path.write_text("\n".join(lines))
+    return path
+
+
+def test_import_filters_and_requires_three():
+    def body(tmp):
+        rows = import_ratings(_ratings_csv(tmp / "r.csv", bad_checks=1))
+        assert all(r["n"] >= 3 for r in rows) and not any(r["worker"].startswith("bad") for r in rows)
+        assert not any(r["item"] == "check1" for r in rows)
+        try:
+            import_ratings(_ratings_csv(tmp / "r2.csv", n_per_item=2))
+            assert False, "fewer than 3 ratings per item must fail"
+        except ValueError:
+            pass
+    with_tmp(body)
+
+
+def test_exports_are_blind_and_include_attention_checks():
+    def body(tmp):
+        run_jobs(jobs(), deps(), tmp / "run")
+        export_rating_tasks(tmp / "run", "brightness", tmp / "tasks.csv", ratings_per_item=3, attention_checks=0.5, seed=0)
+        text = (tmp / "tasks.csv").read_text()
+        assert "unguided" not in text and "check" in text and "a room" not in text
+        export_mask_tasks(tmp / "run", tmp / "masks.json", seed=0)
+        tasks = json.load(open(tmp / "masks.json"))
+        assert len(tasks) == 2 and "image" in tasks[0]["data"] and "unguided" not in json.dumps(tasks[0]["data"])
+    with_tmp(body)
+
+
+def test_import_masks_rasterizes_polygons():
+    def body(tmp):
+        shape = {"type": "polygonlabels", "value": {"points": [[0, 0], [50, 0], [50, 100], [0, 100]], "polygonlabels": ["mug"]}}
+        json.dump([{"data": {"item": "x"}, "annotations": [{"result": [shape]}]}], open(tmp / "m.json", "w"))
+        m = import_masks(tmp / "m.json")["x"]["mug"]
+        assert m.shape == (64, 64) and abs(m.mean() - 0.5) < 0.05 and m[30, 5] == 1 and m[30, 60] == 0
+    with_tmp(body)
+
+
+def test_steps_log_raw_values_for_fitting():
+    def body(tmp):
+        run_jobs(jobs()[:1], deps(), tmp)   # unguided: no guided steps, so also run a guided job
+        guided = Job("stage1", "a room", 0, "dev", "m1_eval", program())
+        run_jobs([guided], deps(), tmp)
+        merge_logs(tmp, tmp / "a.jsonl")
+        rec = next(r for r in read_jsonl(tmp / "a.jsonl") if r["type"] == "constraint")
+        assert 0 <= rec["raw"] <= 100
+    with_tmp(body)
+
+
+def _synthetic_inputs(tmp):
+    """Ratings that follow L*, with every other section supplied directly."""
+    guided = [Job("stage1", f"a room{i}", 0, "dev", "m1_eval", program(f"room{i}")) for i in range(8)]
+    run_jobs(guided, deps(), tmp / "cal")
+    rng = random_module.Random(0)
+    ratings = {}
+    for meta_path in (tmp / "cal").glob("*/*/meta.json"):
+        m = json.load(open(meta_path))
+        item = f"{meta_path.parts[-3]}/{meta_path.parts[-2]}"
+        ratings[item] = m["finals"][0]["raw"] / 100
+    rows = rows_from_run(tmp / "cal", ratings=ratings)
+    extra = []
+    for r in list(rows["ratings"]):
+        for i in range(60):
+            e = rng.uniform(0, 100)
+            extra.append({**r, "e": e, "rating": e / 100, "base": f"synthetic{i}"})
+    rows["ratings"] += extra
+    rows["acceptance"] = [{"family": "F2a", "quantity": "scene_lightness", "hedge": "None", "orientation": 1,
+                           "s": s, "accept": int(0.6 <= s <= 0.8), "base": f"b{i % 40}"}
+                          for i, s in enumerate(rng.uniform(0, 1) for _ in range(800))]
+    return rows
+
+
+def test_synthetic_annotations_to_fitted_run():
+    def body(tmp):
+        data = _synthetic_inputs(tmp)
+        json.dump(data, open(tmp / "input.json", "w"))
+        fit_main(tmp / "input.json", tmp / "calibration.json", SETTINGS, min_images=50)
+        calib = FittedCalibration.load(tmp / "calibration.json")
+        assert calib.valid("F2a", 4)
+        d = deps()
+        d.calib = calib
+        s = run_jobs(jobs(), d, tmp / "out")
+        assert s.done == 2 and s.failed == 0, s.failures
+        guided = Job("stage1", "a room", 0, "dev", "m1_eval", program())
+        assert run_jobs([guided], d, tmp / "out").done == 1
+        merge_logs(tmp / "out", tmp / "a.jsonl")
+        records = read_jsonl(tmp / "a.jsonl")
+        assert all(r["calibration"] == "fitted" for r in records)
+        tier_rows(records)                                       # not refused
+    with_tmp(body)
+
+
+def test_loop_files_do_not_branch_on_calibration_type():
+    here = os.path.dirname(os.path.abspath(__file__))
+    for f in ("guidance.py", "constraints.py", "sar.py"):
+        src = open(os.path.join(here, f)).read()
+        assert "ProvisionalCalibration" not in src and "FittedCalibration" not in src
 
 
 def main():

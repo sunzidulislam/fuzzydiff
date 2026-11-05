@@ -74,6 +74,7 @@ class Measure:
             g, r = d.siglip.logits(x, region, q)
             h = d.calib.presence_logit(bin, g, r)
             ev.objects[q] = {"S": s, "core": erode_core(s, self.erode), "A": area(s), "c": centroid(s), "h": h,
+                             "g": g.detach(), "r": r.detach(),
                              "p": torch.sigmoid(h.detach()), "psi": d.calib.psi(q, {})}
 
     def _weights(self, core, lab):

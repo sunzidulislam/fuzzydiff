@@ -213,7 +213,7 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
                 eta /= 2
 
     _log_step(ctx, step, sigma, b, frozen, accepted, before, after, cos, removed, rejections,
-              before_terms, after_terms)
+              before_terms, after_terms, evidence)
     latent_next = plain_next if accepted is not True else _euler(z_used, sigma, sigma_next, v_used)
     return StepOut(z, latent_next.detach(), sigma, sigma_next, v_plain, z_used, accepted, rejections, n_tried,
                    used_evidence)
@@ -234,15 +234,41 @@ def _reject_reason(frozen, evidence, calib, before, cfg):
     return None
 
 
-def _log_step(ctx, step, sigma, b, frozen, accepted, before, after, cos, removed, rejections, before_terms, after_terms):
+def _raw_fields(f, evidence):
+    """Raw inputs at this step, so calibration can later fit each noise bin (App. "Data")."""
+    c = f.constraint
+    fields = {"raw": _raw(f, evidence), "quantity": ":".join(c.quantity) if isinstance(c.quantity, tuple) else c.quantity}
+    if c.family == "presence" and c.args[0] in evidence.objects:
+        obj = evidence.objects[c.args[0]]
+        fields.update(object=c.args[0], **{"global": float(obj["g"]), "region": float(obj["r"])})
+    if c.family == "F8":
+        objs = [evidence.objects.get(q) for q in c.args]
+        if all(o is not None for o in objs):
+            fields.update(objects=list(c.args), orientation=c.orientation, areas=[float(o["A"].detach()) for o in objs])
+    return fields
+
+
+def _attention_fields(evidence):
+    out = {}
+    for key, a in evidence.attention.items():
+        P = a["P"].detach()
+        i = int(P.argmax())
+        side = P.shape[-1]
+        out[key] = {"peak": a["peak"], "share": a["share"], "mass": a["mass"], "peak_xy": [i // side, i % side]}
+    return out
+
+
+def _log_step(ctx, step, sigma, b, frozen, accepted, before, after, cos, removed, rejections, before_terms, after_terms,
+              evidence):
     for f in frozen:
         key = (f.cid, f.component)
         ctx.log.write(type="constraint", prompt=ctx.prompt, seed=ctx.seed, step=step, sigma=float(sigma), bin=b,
                       family=f.constraint.family, cid=f.cid, component=f.component, tier=f.tier, gates=f.gates,
                       active=f.weight > 0, accepted=accepted if f.weight > 0 else None,
-                      dL=after_terms[key] - before_terms[key] if key in after_terms and key in before_terms else None)
+                      dL=after_terms[key] - before_terms[key] if key in after_terms and key in before_terms else None,
+                      **_raw_fields(f, evidence))
     ctx.log.write(type="step", prompt=ctx.prompt, seed=ctx.seed, step=step, sigma=float(sigma),
-                  tiers=sorted({f.tier for f in frozen if f.weight > 0}), loss_before=before,
+                  attention=_attention_fields(evidence), tiers=sorted({f.tier for f in frozen if f.weight > 0}), loss_before=before,
                   loss_after=after or before, cos=cos, removed=removed, rejections=rejections,
                   accepted=bool(accepted), eps={str(m): e for m, e in ctx.cfg.eps.items()})
 

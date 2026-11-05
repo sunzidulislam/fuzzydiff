@@ -55,6 +55,23 @@ python -I verify_checkpoint.py --model stabilityai/stable-diffusion-3-medium-dif
 Needs a GPU with enough memory for one guided step at 1024^2 (gradient checkpointing is enabled)
 and access to the gated SD3 weights.
 
+## Pipeline
+
+* `settings.py` - typed settings: `configs/fuzzydiff_sd3.yaml`, with placeholders filled from `configs/provisional.yaml`.
+* `prompts.py` - suites from `configs/vocab.yaml`; a hash of the hedge-free base prompt decides the group.
+* `sd3_backend.py` - model access: text, guided velocity, clean prediction, VAE. `tiny_backend()` is the CPU test double.
+* `grounding.py` - phrase tokens, localization fields, confidence statistics, contrastive binding.
+* `estimators.py`, `measure.py` - frozen estimators (analytic colour, CLIPSeg, SigLIP) and the evidence for one latent.
+* `calibration.py` - the interface the loop uses, with provisional values.
+* `calibration_fit.py`, `fit_calibration.py` - fit maps, presence, validity, hedges, size, and thresholds; `FittedCalibration`.
+* `constraints.py` - memberships, Charbonnier losses, gates, the constraint set frozen per step.
+* `guidance.py` - Stage 1: tier projection, bounded step, acceptance. `sar.py` - Stage 2: priors, drift checks, rollback, fallback.
+* `run_experiment.py` - arms, per-image saving, resume. `annotate.py` - blind pages, annotation export and import.
+* `../notebooks/fuzzydiff_kaggle.ipynb` - thin Kaggle driver: verify, M1, then the SAR comparison.
+
+Tests run on CPU with no downloads: `for f in code/test_*.py; do python -I "$f"; done`.
+Records from provisional calibration show that the pipeline runs; `reporting.py` refuses them for paper tables.
+
 ## Backbone scope
 
 The method in the paper is backbone-agnostic (any flow-matching MM-DiT with joint attention).
