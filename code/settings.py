@@ -27,7 +27,7 @@ class Settings:
     @staticmethod
     def parse(value, cast=float):
         s = str(value)
-        for wrapper in (r"\verify\{(.*)\}", r"\$(.*)\$"):
+        for wrapper in (r"\\verify\{(.*)\}", r"\$(.*)\$"):
             m = re.fullmatch(wrapper, s.strip())
             if m:
                 s = m.group(1)
