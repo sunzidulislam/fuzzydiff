@@ -135,6 +135,24 @@ def test_c4_verify_checkpoint_does_not_keep_encoders_with_the_transformer():
     assert "torch_dtype=dt).to(dev)" not in src and "del_text_encoders" in src
 
 
+def test_c4_nothing_keeps_the_text_encoders_alive_after_deletion():
+    import gc
+    import inspect
+    import weakref
+    from types import SimpleNamespace
+
+    import verify_checkpoint as vc
+    tree = torch.nn.Linear
+    pipe = SimpleNamespace(text_encoder=tree(1, 1), text_encoder_2=tree(1, 1), text_encoder_3=tree(1, 1))
+    t5 = weakref.ref(pipe.text_encoder_3)
+    vc.encoders_to(pipe, "cpu")
+    vc.del_text_encoders(pipe)
+    gc.collect()
+    assert t5() is None
+    # main() holds a reference for its whole life if it loops over the encoders itself
+    assert "for encoder in" not in inspect.getsource(vc.main)
+
+
 # ---------------------------------------------------------------------------- Important
 def test_i1_mixture_uses_the_object_not_the_background():
     x = torch.full((3, 64, 64), 0.05, dtype=DT)

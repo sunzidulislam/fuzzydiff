@@ -112,11 +112,18 @@ def backbone_config(args, pipe, tr):
     return cfg
 
 
+def encoders_to(pipe, dev):
+    """In its own function: a loop variable in main() would keep T5 alive after del_text_encoders."""
+    for encoder in (pipe.text_encoder, pipe.text_encoder_2, pipe.text_encoder_3):
+        encoder.to(dev)
+
+
 def del_text_encoders(pipe):
     """T5 and the transformer do not fit on one T4 together; every later check reuses the embeddings."""
     pipe.text_encoder = pipe.text_encoder_2 = pipe.text_encoder_3 = None
     gc.collect()
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def main():
@@ -148,8 +155,7 @@ def main():
         from diffusers import StableDiffusion3Pipeline
         dev, dt = torch.device("cuda"), torch.bfloat16
         pipe = StableDiffusion3Pipeline.from_pretrained(args.model, torch_dtype=dt)
-        for encoder in (pipe.text_encoder, pipe.text_encoder_2, pipe.text_encoder_3):
-            encoder.to(dev)
+        encoders_to(pipe, dev)
         tr = pipe.transformer
         in_ch = tr.config.in_channels
         vae_f = pipe.vae_scale_factor
