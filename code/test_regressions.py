@@ -240,6 +240,17 @@ def test_t4_vae_without_gradients_uses_no_checkpoint():
     assert not calls
 
 
+def test_verify_checkpoint_can_write_its_tables_to_another_folder():
+    import verify_checkpoint as vc
+    from table_rows import write_rows
+
+    def body(tmp):
+        vc.copy_table_inputs(tmp)
+        write_rows(tmp)
+        assert (tmp / "processor_check_rows.tex").exists()
+    with_tmp(body)
+
+
 # ---------------------------------------------------------------------------- Important
 def test_i1_mixture_uses_the_object_not_the_background():
     x = torch.full((3, 64, 64), 0.05, dtype=DT)

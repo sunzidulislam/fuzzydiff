@@ -32,6 +32,7 @@ import argparse
 import gc
 import json
 import os
+import shutil
 import sys
 import time
 
@@ -111,6 +112,15 @@ def backbone_config(args, pipe, tr):
         for k, v in rows.items():
             f.write(f"\\renewcommand{{\\{k}}}{{{v}}}\n")
     return cfg
+
+
+def copy_table_inputs(out_dir):
+    """The table also reads the CPU check results, which live next to this script."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for name in ("processor_check.json", "arch_check.json"):
+        target = os.path.join(out_dir, name)
+        if not os.path.exists(target):
+            shutil.copy(os.path.join(here, name), target)
 
 
 def encoders_to(pipe, dev):
@@ -350,6 +360,7 @@ def main():
             f.write(f"\\renewcommand{{\\memGuided}}{{{res['mem_guided_gb']:.1f}\\,GB / {res['time_guided_s']:.2f}\\,s}}\n")
             f.write(f"\\renewcommand{{\\memUnguided}}{{{res['mem_unguided_gb']:.1f}\\,GB / {res['time_unguided_s']:.2f}\\,s}}\n")
             f.write(f"\\renewcommand{{\\memSAR}}{{{res['mem_sar_gb']:.1f}\\,GB / {res['time_sar_s']:.2f}\\,s}}\n")
+        copy_table_inputs(args.out)
         write_rows(args.out)
     print(json.dumps(res, indent=2, default=str))
 
