@@ -251,6 +251,60 @@ def test_verify_checkpoint_can_write_its_tables_to_another_folder():
     with_tmp(body)
 
 
+def test_kaggle_readout_gradient_survives_zero_text_mass():
+    b = tiny_backend(read_blocks=(0, 1))
+    with torch.no_grad():                                        # image keys dominate, as they can on real weights
+        for block in b.transformer.transformer_blocks:
+            block.attn.to_q.weight.mul_(300)
+            block.attn.to_k.weight.mul_(300)
+    c = b.encode_prompt("a red mug", {"mug": (6, 9)})
+    z = b.noise_like_latent(0).requires_grad_()
+    out = b.velocity(z, torch.tensor(0.5, dtype=DT), c, readout=True)
+    assert out.text_mass[0].min() == 0, "this test needs an image query with no text mass"
+    assert torch.isfinite(out.shares["mug"][0]).all()
+    out.maps["mug"][0].sum().backward()
+    assert torch.isfinite(z.grad).all()
+
+
+def test_kaggle_peak_memory_helpers_use_the_requested_gpu():
+    import verify_checkpoint as vc
+    seen = []
+    original = torch.cuda.max_memory_allocated, torch.cuda.reset_peak_memory_stats
+    torch.cuda.max_memory_allocated = lambda device=None: (seen.append(device), 0)[1]
+    torch.cuda.reset_peak_memory_stats = lambda device=None: seen.append(device)
+    try:
+        dev = torch.device("cuda:1")
+        vc.peak_gb(dev)
+        vc.reset_peak(dev)
+    finally:
+        torch.cuda.max_memory_allocated, torch.cuda.reset_peak_memory_stats = original
+    assert seen == [dev, dev]
+
+
+def test_kaggle_oom_record_shows_every_gpu():
+    def body(tmp):
+        def stage1(*a, **k):
+            raise torch.cuda.OutOfMemoryError("CUDA out of memory")
+
+        d = Deps(tiny_backend(), PROV, measure_scene, CFG, S, stage1=stage1)
+        run_jobs([Job("unguided", "a room", 0, "dev", "m1_eval", ROOM)], d, tmp)
+        meta = json.load(open(tmp / "unguided" / image_id("a room", 0) / "meta.json"))
+        assert meta["failed"] == "oom" and "peak_by_gpu" in meta and "CUDA out of memory" in meta["error"]
+    with_tmp(body)
+
+
+def test_kaggle_vae_defaults_to_16_bits():
+    import inspect
+
+    import run_experiment
+    import sd3_backend
+    import verify_checkpoint
+    assert inspect.signature(sd3_backend.load_backend).parameters["vae_dtype"].default == torch.float16
+    assert '"--vae-dtype", default="float16"' in inspect.getsource(run_experiment.main)
+    assert '"--vae-dtype", default="float16"' in inspect.getsource(verify_checkpoint.main)
+    assert "fp16 transformer and VAE" in S.get("cfgPrecision", str)
+
+
 # ---------------------------------------------------------------------------- Important
 def test_i1_mixture_uses_the_object_not_the_background():
     x = torch.full((3, 64, 64), 0.05, dtype=DT)

@@ -165,12 +165,14 @@ class FuzzyJointAttnProcessor:
             def _read(q, k, _bias=bias):
                 a = chunked_text_attention(q, k, n_img, cols_t, scale, _bias, self.chunk)   # [H, N_I, |cols|]
                 out = []
-                mass = a.sum(-1) if want_share else None                                   # [H, N_I]
+                # Confidence statistics only: never differentiated, and a query can have no text mass at
+                # all, where 0/0 would otherwise poison the gradient of every map through the shared graph.
+                mass = a.sum(-1).detach() if want_share else None                         # [H, N_I]
                 for p in phrases:
                     ap = a[:, :, pos[p]]
                     out.append(ap.mean(dim=(0, 2)))                                         # B_q
                     if want_share:
-                        out.append((ap.sum(-1) / mass).mean(0))                             # share_q
+                        out.append((ap.detach().sum(-1) / mass.clamp_min(1e-30)).mean(0))    # share_q
                 if want_share:
                     out.append(mass.mean(0))                                                # text mass
                 return torch.stack(out)

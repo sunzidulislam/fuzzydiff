@@ -53,7 +53,7 @@ groups:
     value: '0.0609'
     status: proposed
   - name: cfgPrecision
-    value: fp16 transformer weights; fp32 VAE, estimator outputs, attention readout, losses, and updates
+    value: fp16 transformer and VAE weights; fp32 estimators, attention readout, losses, and updates
     status: proposed
   - name: cfgGPU
     value: '[GPU model, memory]'

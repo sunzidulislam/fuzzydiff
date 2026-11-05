@@ -80,7 +80,7 @@ class Backend:
         self.transformer, self.vae, self.cfg, self.shift = transformer.eval(), vae.eval(), cfg, shift
         self.read_blocks, self.sar_blocks = list(read_blocks), list(sar_blocks)
         self.tf_device, self.vae_device, self.dtype = torch.device(tf_device), torch.device(vae_device), dtype
-        # 16-bit transformer weights; latents, estimators, losses, updates, and the VAE stay wider.
+        # 16-bit model weights; latents, estimators, losses, and updates stay wider.
         self.latent_dtype = torch.float64 if dtype == torch.float64 else torch.float32
         self.vae_dtype = next(vae.parameters()).dtype
         self.latent_size = latent_size
@@ -218,11 +218,11 @@ def _pipeline_encoder(pipe, device):
 
 
 def load_backend(model_id, read_blocks, sar_blocks=None, tf_device="cuda:0", vae_device=None, dtype=torch.float16,
-                 cfg=7.0, resolution=1024) -> Backend:
+                 cfg=7.0, resolution=1024, vae_dtype=torch.float16) -> Backend:
     from diffusers import StableDiffusion3Pipeline
     pipe = StableDiffusion3Pipeline.from_pretrained(model_id, torch_dtype=dtype)
     vae_device = vae_device or tf_device
-    pipe.vae.to(vae_device, torch.float32)
+    pipe.vae.to(vae_device, vae_dtype)
     for enc in (pipe.text_encoder, pipe.text_encoder_2, pipe.text_encoder_3):
         enc.to(tf_device)
     backend = Backend(pipe.transformer, pipe.vae, cfg, pipe.scheduler.config.shift, read_blocks,

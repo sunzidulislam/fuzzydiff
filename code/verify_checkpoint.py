@@ -60,13 +60,13 @@ def sync(dev):
 
 
 def peak_gb(dev):
-    return torch.cuda.max_memory_allocated() / 2**30 if dev.type == "cuda" else float("nan")
+    return torch.cuda.max_memory_allocated(dev) / 2**30 if dev.type == "cuda" else float("nan")
 
 
 def reset_peak(dev):
     if dev.type == "cuda":
         torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
+        torch.cuda.reset_peak_memory_stats(dev)
 
 
 def backbone_config(args, pipe, tr):
@@ -147,7 +147,8 @@ def main():
     ap.add_argument("--prompt", default="a slightly red mug next to a blue teapot")
     ap.add_argument("--word", default="mug")
     ap.add_argument("--dtype", default="float16", choices=["float16", "float32", "bfloat16"])
-    ap.add_argument("--vae-device", default=None, help="measure memory with the VAE here, in float32, as the pipeline runs it")
+    ap.add_argument("--vae-device", default=None, help="measure memory with the VAE here, as the pipeline runs it")
+    ap.add_argument("--vae-dtype", default="float16", choices=["float16", "float32"])
     ap.add_argument("--out", default=os.path.dirname(os.path.abspath(__file__)))
     args = ap.parse_args()
 
@@ -219,6 +220,11 @@ def main():
     set_procs(tr, lambda i: JointAttnProcessor2_0())
     y0 = fwd(tr, x, ctx, pooled, t)
     g0, = torch.autograd.grad((y0.float() * w.float()).sum(), x)
+    y_again = fwd(tr, x, ctx, pooled, t)
+    g_again, = torch.autograd.grad((y_again.float() * w.float()).sum(), x)
+    # The same computation repeated: how much a gradient differs here with nothing changed.
+    res["identity_grad_noise_floor"] = rel(g_again.float(), g0.float())
+    del y_again, g_again
     set_procs(tr, lambda i: FuzzyJointAttnProcessor())
     y1 = fwd(tr, x, ctx, pooled, t)
     g1, = torch.autograd.grad((y1.float() * w.float()).sum(), x)
@@ -304,7 +310,7 @@ def main():
     vae_dev = None
     if pipe is not None and args.vae_device:
         vae_dev = torch.device(args.vae_device)
-        pipe.vae.to(vae_dev, torch.float32)
+        pipe.vae.to(vae_dev, getattr(torch, args.vae_dtype))
         torch.cuda.empty_cache()
         torch.zeros(1, device=vae_dev)
         reset_peak(vae_dev)

@@ -312,8 +312,9 @@ def run_image(job: Job, deps: Deps, out: Path) -> dict:
     head = {"arm": job.arm, "prompt": job.prompt, "seed": job.seed}
     try:
         meta = _execute(job, deps, out, tmp)
-    except torch.cuda.OutOfMemoryError:
-        meta = {**head, "failed": "oom", "peak_gb": _peak_gb()}
+    except torch.cuda.OutOfMemoryError as e:
+        meta = {**head, "failed": "oom", "peak_gb": _peak_gb(), "peak_by_gpu": peak_memory(), "error": str(e)[:400],
+                "traceback": traceback.format_exc()[-1500:]}
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
     except JobFailure as e:
@@ -492,6 +493,8 @@ def main():
     ap.add_argument("--resolution", type=int, default=1024)
     # bfloat16 needs the full attention matrix on a T4: one attention step exceeds 14.5 GiB (measured).
     ap.add_argument("--dtype", default="float16", choices=["float16", "float32", "bfloat16"])
+    # With CLIPSeg and SigLIP on its GPU, a float32 VAE ran out of memory on a T4 (measured).
+    ap.add_argument("--vae-dtype", default="float16", choices=["float16", "float32"])
     ap.add_argument("--tiny", action="store_true", help="smoke test on the tiny random model (CPU)")
     ap.add_argument("--limit", type=int, default=None, help="only the first N jobs")
     ap.add_argument("--calibration", default=None, help="fitted calibration file; provisional values if omitted")
@@ -510,7 +513,7 @@ def main():
         sar = dataclasses.replace(sar, k=1)
     else:
         backend = load_backend(args.model, s.get("cfgReadBlocks", list), s.get("cfgSARBlocks", list), args.tf_device,
-                               args.vae_device, getattr(torch, args.dtype), s.get("cfgCFG"), args.resolution)
+                               args.vae_device, getattr(torch, args.dtype), s.get("cfgCFG"), args.resolution, getattr(torch, args.vae_dtype))
     if args.suite.startswith("m1"):
         jobs = m1_jobs(args.suite == "m1_tune")
         deps = Deps(backend, calib, measure_scene, cfg, s, unload_text=not args.tiny)
