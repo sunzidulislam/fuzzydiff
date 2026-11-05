@@ -490,7 +490,8 @@ def main():
     ap.add_argument("--tf-device", default="cuda:0")
     ap.add_argument("--vae-device", default=None)
     ap.add_argument("--resolution", type=int, default=1024)
-    ap.add_argument("--dtype", default="bfloat16", choices=["bfloat16", "float16", "float32"])
+    # bfloat16 needs the full attention matrix on a T4: one attention step exceeds 14.5 GiB (measured).
+    ap.add_argument("--dtype", default="float16", choices=["float16", "float32", "bfloat16"])
     ap.add_argument("--tiny", action="store_true", help="smoke test on the tiny random model (CPU)")
     ap.add_argument("--limit", type=int, default=None, help="only the first N jobs")
     ap.add_argument("--calibration", default=None, help="fitted calibration file; provisional values if omitted")

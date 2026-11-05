@@ -62,8 +62,9 @@ class Backend:
         self.transformer, self.vae, self.cfg, self.shift = transformer.eval(), vae.eval(), cfg, shift
         self.read_blocks, self.sar_blocks = list(read_blocks), list(sar_blocks)
         self.tf_device, self.vae_device, self.dtype = torch.device(tf_device), torch.device(vae_device), dtype
-        # Paper: bf16 weights, fp32 estimator outputs, losses, and updates.
+        # 16-bit transformer weights; latents, estimators, losses, updates, and the VAE stay wider.
         self.latent_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+        self.vae_dtype = next(vae.parameters()).dtype
         self.latent_size = latent_size
         self._encoder = encoder
         self._deferred = defer_transformer  # T5 and the transformer do not fit on one T4 together
@@ -116,10 +117,14 @@ class Backend:
             self._deferred = False
 
     # ------------------------------------------------------------------------------ velocity
+    def _timestep(self, sigma, n):
+        """Computed wide: a 16-bit sigma would move the timestep by up to about 2 of 1000."""
+        return (sigma.to(self.tf_device, self.latent_dtype) * 1000).reshape(1).repeat(n)
+
     def _forward(self, z, sigma, embeds, pooled):
         if self._deferred:
             raise RuntimeError("encode all prompts, then call unload_text_encoders, before running the transformer")
-        t = (sigma.to(self.tf_device, self.dtype) * 1000).reshape(1).repeat(z.shape[0])
+        t = self._timestep(sigma, z.shape[0])
         return self.transformer(hidden_states=z, encoder_hidden_states=embeds, pooled_projections=pooled,
                                 timestep=t, return_dict=False)[0]
 
@@ -167,14 +172,14 @@ class Backend:
     def decode(self, z0) -> torch.Tensor:
         """[1, 3, H, W] in [0, 1]; the clamp passes gradients straight through."""
         c = self.vae.config
-        x = self.vae.decode(z0.to(self.vae_device, self.dtype) / c.scaling_factor + c.shift_factor).sample
+        x = self.vae.decode(z0.to(self.vae_device, self.vae_dtype) / c.scaling_factor + c.shift_factor).sample
         x = ((x + 1) / 2).to(self.latent_dtype)
         return x + (x.clamp(0, 1) - x).detach()
 
     def encode(self, x) -> torch.Tensor:
         """Deterministic (posterior mode), so every Stage-2 arm starts from the same latent."""
         c = self.vae.config
-        h = self.vae.encode(2 * x.to(self.vae_device, self.dtype) - 1).latent_dist.mode()
+        h = self.vae.encode(2 * x.to(self.vae_device, self.vae_dtype) - 1).latent_dist.mode()
         return ((h - c.shift_factor) * c.scaling_factor).to(self.tf_device, self.latent_dtype)
 
 
@@ -194,12 +199,12 @@ def _pipeline_encoder(pipe, device):
     return encode
 
 
-def load_backend(model_id, read_blocks, sar_blocks=None, tf_device="cuda:0", vae_device=None, dtype=torch.bfloat16,
+def load_backend(model_id, read_blocks, sar_blocks=None, tf_device="cuda:0", vae_device=None, dtype=torch.float16,
                  cfg=7.0, resolution=1024) -> Backend:
     from diffusers import StableDiffusion3Pipeline
     pipe = StableDiffusion3Pipeline.from_pretrained(model_id, torch_dtype=dtype)
     vae_device = vae_device or tf_device
-    pipe.vae.to(vae_device)
+    pipe.vae.to(vae_device, torch.float32)
     for enc in (pipe.text_encoder, pipe.text_encoder_2, pipe.text_encoder_3):
         enc.to(tf_device)
     backend = Backend(pipe.transformer, pipe.vae, cfg, pipe.scheduler.config.shift, read_blocks,
@@ -230,7 +235,7 @@ def _tiny_encoder(dt, n_t5=8):
     return encode
 
 
-def tiny_backend(seed: int = 0, read_blocks=(0, 1), sar_blocks=None, defer_transformer=False) -> Backend:
+def tiny_backend(seed: int = 0, read_blocks=(0, 1), sar_blocks=None, defer_transformer=False, vae_dtype=None) -> Backend:
     """Random 3-block transformer and 4-level VAE on CPU in float64; 16 latent -> 128 pixels."""
     torch.manual_seed(seed)
     dt = torch.float64
@@ -244,7 +249,7 @@ def tiny_backend(seed: int = 0, read_blocks=(0, 1), sar_blocks=None, defer_trans
     vae = AutoencoderKL(in_channels=3, out_channels=3, down_block_types=("DownEncoderBlock2D",) * 4,
                         up_block_types=("UpDecoderBlock2D",) * 4, block_out_channels=(4,) * 4, layers_per_block=1,
                         latent_channels=4, norm_num_groups=2, scaling_factor=1.5305, shift_factor=0.0609,
-                        use_quant_conv=False, use_post_quant_conv=False).to(dt)
+                        use_quant_conv=False, use_post_quant_conv=False).to(vae_dtype or dt)
     b = Backend(tr, vae, 7.0, 3.0, read_blocks, sar_blocks if sar_blocks is not None else read_blocks, "cpu", "cpu",
                 dt, 16, encoder=_tiny_encoder(dt), defer_transformer=defer_transformer)
     b.n_text = CLIP_TOKENS + 8

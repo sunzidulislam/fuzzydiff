@@ -153,6 +153,40 @@ def test_c4_nothing_keeps_the_text_encoders_alive_after_deletion():
     assert "for encoder in" not in inspect.getsource(vc.main)
 
 
+def test_t4_vae_can_run_at_higher_precision_than_the_transformer():
+    b = tiny_backend(vae_dtype=torch.float32)
+    z = b.noise_like_latent(0)
+    assert b.decode(z).shape[1] == 3 and b.encode(b.decode(z)).shape == z.shape
+
+
+def test_t4_timestep_is_not_rounded_to_transformer_precision():
+    b = tiny_backend()
+    b.dtype, b.latent_dtype = torch.float16, torch.float32
+    t = b._timestep(torch.tensor(0.8137, dtype=DT), 2)
+    assert t.dtype == torch.float32 and t.shape == (2,) and abs(t[0].item() - 813.7) < 0.01
+
+
+def test_t4_attention_readout_keeps_small_probabilities_in_float16():
+    from fuzzydiff_sd3_attention import chunked_text_attention
+    torch.manual_seed(0)
+    q, k = torch.randn(2, 256, 16, dtype=DT) * 3, torch.randn(2, 300, 16, dtype=DT) * 3
+    idx = torch.arange(20)
+    exact = chunked_text_attention(q, k, 256, idx, 0.25, None, 64)
+    half = chunked_text_attention(q.to(torch.float16), k.to(torch.float16), 256, idx, 0.25, None, 64)
+    assert half.dtype == torch.float32
+    assert (half.double() - exact).abs().max() < 1e-2 and (half > 0).all()
+
+
+def test_t4_defaults_use_a_precision_this_gpu_can_run():
+    import inspect
+
+    import run_experiment
+    import verify_checkpoint
+    assert 'default="float16"' in inspect.getsource(run_experiment.main)
+    assert 'default="float16"' in inspect.getsource(verify_checkpoint.main)
+    assert "bf16" not in S.get("cfgPrecision", str)
+
+
 # ---------------------------------------------------------------------------- Important
 def test_i1_mixture_uses_the_object_not_the_background():
     x = torch.full((3, 64, 64), 0.05, dtype=DT)

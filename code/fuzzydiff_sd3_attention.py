@@ -46,7 +46,11 @@ def chunked_text_attention(
 
     Returns A[h, i, m] = softmax_j(q_i k_j^T * scale + b_ij)[text_idx[m]],
     the softmax being over all N joint keys, without materializing [H, N_I, N].
+    Half-precision inputs are widened: these probabilities are too small for 16 bits.
     """
+    if q_img.dtype in (torch.float16, torch.bfloat16):
+        q_img, k_all = q_img.float(), k_all.float()
+        bias_text = None if bias_text is None else bias_text.float()
     H, n_q, _ = q_img.shape
     n = k_all.shape[1]
     lse = torch.full((H, n_q), -math.inf, dtype=q_img.dtype, device=q_img.device)

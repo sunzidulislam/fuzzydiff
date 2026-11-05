@@ -135,6 +135,7 @@ def main():
     ap.add_argument("--steps", type=int, default=28)
     ap.add_argument("--prompt", default="a slightly red mug next to a blue teapot")
     ap.add_argument("--word", default="mug")
+    ap.add_argument("--dtype", default="float16", choices=["float16", "float32", "bfloat16"])
     ap.add_argument("--out", default=os.path.dirname(os.path.abspath(__file__)))
     args = ap.parse_args()
 
@@ -153,7 +154,7 @@ def main():
         res["mode"] = "tiny (random weights, CPU, float64)"
     else:
         from diffusers import StableDiffusion3Pipeline
-        dev, dt = torch.device("cuda"), torch.bfloat16
+        dev, dt = torch.device("cuda"), getattr(torch, args.dtype)
         pipe = StableDiffusion3Pipeline.from_pretrained(args.model, torch_dtype=dt)
         encoders_to(pipe, dev)
         tr = pipe.transformer
@@ -182,7 +183,7 @@ def main():
                                      "joint_key_indices": [n_img + CLIP_TOKENS + j for j in word_idx],
                                      "packed_rows_equal_t5": bool(packed_ok)}
         res["qk_norm"] = getattr(tr.transformer_blocks[0].attn, "norm_q", None) is not None
-        res["mode"] = f"{args.model}, {args.res}^2, bf16"
+        res["mode"] = f"{args.model}, {args.res}^2, {args.dtype}"
         res["backbone_config"] = backbone_config(args, pipe, tr)
         del_text_encoders(pipe)
         tr.to(dev)
