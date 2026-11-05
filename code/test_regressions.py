@@ -21,6 +21,7 @@ from calibration_fit import FittedCalibration  # noqa: E402
 from color_stats import mixture_stats, srgb_to_oklab, trimmed_mean  # noqa: E402
 from constraints import Evidence, Frozen, new_state, tier_losses  # noqa: E402
 from estimators import processor_size, region_crop  # noqa: E402
+import torch.utils.checkpoint  # noqa: E402
 from fit_calibration import fit_main, rows_from_run  # noqa: E402
 from grounding import aggregate_maps, missing_phrases, phrase_spans  # noqa: E402
 from guidance import GuideCfg, Stage1Ctx, guided_step, run_stage1  # noqa: E402
@@ -185,6 +186,58 @@ def test_t4_defaults_use_a_precision_this_gpu_can_run():
     assert 'default="float16"' in inspect.getsource(run_experiment.main)
     assert 'default="float16"' in inspect.getsource(verify_checkpoint.main)
     assert "bf16" not in S.get("cfgPrecision", str)
+
+
+def _count_resnets(vae):
+    from diffusers.models.resnet import ResnetBlock2D
+    return sum(isinstance(m, ResnetBlock2D) for m in vae.decoder.modules())
+
+
+def test_t4_vae_backward_rebuilds_one_resnet_at_a_time():
+    b = tiny_backend()
+    calls = []
+    original = torch.utils.checkpoint.checkpoint
+
+    def spy(*a, **k):
+        calls.append(1)
+        return original(*a, **k)
+
+    z = b.noise_like_latent(0).requires_grad_()
+    torch.utils.checkpoint.checkpoint = spy
+    try:
+        with_ckpt = b.decode(z).sum()
+    finally:
+        torch.utils.checkpoint.checkpoint = original
+    assert len(calls) == _count_resnets(b.vae)                   # per resnet, and not also per block
+    with_ckpt.backward()
+    assert torch.isfinite(z.grad).all() and z.grad.abs().sum() > 0
+
+
+def test_t4_vae_gradient_is_unchanged_by_checkpointing():
+    from sd3_backend import checkpoint_vae_resnets
+    plain = tiny_backend()
+    for m in plain.vae.decoder.modules():
+        m.__dict__.pop("forward", None)                          # undo the per-resnet wrapper
+    z = plain.noise_like_latent(0).requires_grad_()
+    plain.decode(z).sum().backward()
+    wrapped = tiny_backend()
+    y = wrapped.noise_like_latent(0).requires_grad_()
+    wrapped.decode(y).sum().backward()
+    assert (z.grad - y.grad).abs().max() < 1e-9
+    assert checkpoint_vae_resnets is not None
+
+
+def test_t4_vae_without_gradients_uses_no_checkpoint():
+    b = tiny_backend()
+    calls = []
+    original = torch.utils.checkpoint.checkpoint
+    torch.utils.checkpoint.checkpoint = lambda *a, **k: (calls.append(1), original(*a, **k))[1]
+    try:
+        with torch.no_grad():
+            b.decode(b.noise_like_latent(0))
+    finally:
+        torch.utils.checkpoint.checkpoint = original
+    assert not calls
 
 
 # ---------------------------------------------------------------------------- Important

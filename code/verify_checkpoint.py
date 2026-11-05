@@ -39,6 +39,7 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fuzzydiff_sd3_attention import FuzzyJointAttnProcessor  # noqa: E402
+from sd3_backend import checkpoint_vae_resnets  # noqa: E402
 from table_rows import write_rows  # noqa: E402
 from test_processor import MaterializedReference, rel, set_procs, make_model  # noqa: E402
 
@@ -136,6 +137,7 @@ def main():
     ap.add_argument("--prompt", default="a slightly red mug next to a blue teapot")
     ap.add_argument("--word", default="mug")
     ap.add_argument("--dtype", default="float16", choices=["float16", "float32", "bfloat16"])
+    ap.add_argument("--vae-device", default=None, help="measure memory with the VAE here, in float32, as the pipeline runs it")
     ap.add_argument("--out", default=os.path.dirname(os.path.abspath(__file__)))
     args = ap.parse_args()
 
@@ -284,6 +286,19 @@ def main():
         reset_peak(dev); sync(dev); t0 = time.perf_counter(); fn(); sync(dev)
         return time.perf_counter() - t0, peak_gb(dev)
 
+    def decode(z0):
+        c = pipe.vae.config
+        param = next(pipe.vae.parameters())
+        return pipe.vae.decode(z0.to(param.device, param.dtype) / c.scaling_factor + c.shift_factor).sample
+
+    vae_dev = None
+    if pipe is not None and args.vae_device:
+        vae_dev = torch.device(args.vae_device)
+        pipe.vae.to(vae_dev, torch.float32)
+        torch.cuda.empty_cache()
+        torch.zeros(1, device=vae_dev)
+        reset_peak(vae_dev)
+
     xm = torch.randn(1, in_ch, lat, lat, dtype=dt, device=dev)
     set_procs(tr, lambda i: JointAttnProcessor2_0())
     with torch.no_grad():
@@ -296,20 +311,15 @@ def main():
         v = fwd(tr, z.repeat(2, 1, 1, 1), ctx, pooled, t)
         v = v[1:] + 7.0 * (v[:1] - v[1:])
         z0 = z - 0.8 * v
-        if pipe is not None:
-            img = pipe.vae.decode(z0 / pipe.vae.config.scaling_factor + pipe.vae.config.shift_factor).sample
-        else:
-            img = z0
-        loss = img.float().mean() + sum(m.float().mean() for pr in procs.values() for m in pr.maps.values())
+        img = decode(z0) if pipe is not None else z0
+        loss = img.float().mean().to(z.device) + sum(m.float().mean() for pr in procs.values() for m in pr.maps.values())
         torch.autograd.grad(loss, z)
 
     if pipe is not None:
-        try:
-            pipe.vae.enable_gradient_checkpointing()
-            pipe.vae.decoder.training = True
-        except Exception:
-            pass
+        checkpoint_vae_resnets(pipe.vae)
     res["time_guided_s"], res["mem_guided_gb"] = timed(guided)
+    if vae_dev is not None:
+        res["mem_guided_vae_gpu_gb"] = peak_gb(vae_dev)
 
     # SAR step as sequenced in the paper (App. B, "Order of operations"):
     #   (1) SAR-free CFG forward at z_k  -> clean prediction for the drift check,
@@ -324,7 +334,7 @@ def main():
         v = fwd(tr, xm.repeat(2, 1, 1, 1), ctx, pooled, t)
         z0 = xm - 0.8 * (v[1:] + 7.0 * (v[:1] - v[1:]))
         if pipe is not None:
-            pipe.vae.decode(z0 / pipe.vae.config.scaling_factor + pipe.vae.config.shift_factor)
+            decode(z0)
         set_procs(tr, lambda i: sar_procs[1])
         v_c = fwd(tr, xm, ctx[:1], pooled[:1], t[:1])
         return v[1:] + 7.0 * (v_c - v[1:])

@@ -3,9 +3,9 @@
 Guidance and SAR depend only on `Backend`, so the CPU tests run them on `tiny_backend()` (random
 weights, no downloads). The CFG batch is [cond, uncond], so the conditional branch is batch 0.
 
-diffusers 0.31.0 applies gradient checkpointing only when the module's own `training` flag is set.
-`_enable_checkpointing` sets that flag on the two top-level modules only; every submodule stays in
-eval mode, so dropout and normalization behave as in inference.
+diffusers 0.31.0 checkpoints transformer blocks only when the module's own `training` flag is set.
+`_enable_checkpointing` sets that flag on the top-level module only; every submodule stays in eval
+mode, so dropout and normalization behave as in inference.
 """
 from __future__ import annotations
 
@@ -17,7 +17,9 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
+import torch.utils.checkpoint
 from diffusers import AutoencoderKL, FlowMatchEulerDiscreteScheduler, SD3Transformer2DModel
+from diffusers.models.resnet import ResnetBlock2D
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fuzzydiff_sd3_attention import FuzzyJointAttnProcessor  # noqa: E402
@@ -48,11 +50,27 @@ class VelocityOut:
     text_mass: Dict[int, torch.Tensor] = field(default_factory=dict)
 
 
+def checkpoint_vae_resnets(vae):
+    """Recompute one decoder resnet at a time in the backward pass. Per-block checkpointing rebuilds
+    the last up block whole, about 8 GiB at 1024^2 in 16 bits and twice that in float32 (measured
+    on a T4), which does not fit on the GPU."""
+    for module in vae.decoder.modules():
+        if isinstance(module, ResnetBlock2D):
+            module.forward = _checkpointed(module.forward)
+
+
+def _checkpointed(forward):
+    def run(hidden_states, temb=None):
+        if not torch.is_grad_enabled():
+            return forward(hidden_states, temb)
+        return torch.utils.checkpoint.checkpoint(forward, hidden_states, temb, use_reentrant=False)
+    return run
+
+
 def _enable_checkpointing(transformer, vae):
     transformer.enable_gradient_checkpointing()
     transformer.training = True
-    vae.enable_gradient_checkpointing()
-    vae.decoder.training = True
+    checkpoint_vae_resnets(vae)
 
 
 class Backend:
