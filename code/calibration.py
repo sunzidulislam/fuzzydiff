@@ -35,6 +35,7 @@ class Calibration(Protocol):
     def psi(self, phrase, features) -> float: ...
     def drift_thresholds(self, stratum): ...
     def attention_ok(self, kind) -> bool: ...
+    def stage2_valid(self, bin) -> bool: ...
 
 
 def domain_weight(e, lo, hi, band):
@@ -113,4 +114,7 @@ class ProvisionalCalibration:
         return (self.s.get("theta_drift"), self.s.get("cfgDeltaRel"))
 
     def attention_ok(self, kind):
+        return True
+
+    def stage2_valid(self, bin):
         return True

@@ -214,8 +214,9 @@ def sar_log_multiplier(prior_img: torch.Tensor, text_idx_by_phrase: Dict[str, Li
     priors[q]: [N_I] prior M_q on the image-token grid (already fused/competed);
     keys of phrase q get log((1 + a M)(1 - b (1 - M))); all other keys get 0.
     """
-    n_img = prior_img.shape[0] if prior_img is not None else next(iter(priors.values())).shape[0]
-    log_r = torch.zeros(n_img, n_text)
+    first = next(iter(priors.values()))
+    n_img = prior_img.shape[0] if prior_img is not None else first.shape[0]
+    log_r = torch.zeros(n_img, n_text, dtype=first.dtype, device=first.device)
     for q, idx in text_idx_by_phrase.items():
         m = priors[q].clamp(0, 1)
         r = (1 + alpha[q] * m) * (1 - beta[q] * (1 - m))
