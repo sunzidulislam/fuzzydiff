@@ -64,6 +64,57 @@ def build_rating_page(images: List[Path], out: Path, seed: int,
         json.dump(key, f, indent=1)
 
 
+COMPARE_PAGE = """<!doctype html><meta charset="utf-8"><title>Blind comparison</title>
+<style>body{font:15px system-ui;margin:0 auto;max-width:980px;padding:16px}
+.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+img{width:100%%;display:block}label{display:block;margin:6px 0}textarea{width:100%%;height:140px}
+section{margin-bottom:36px}</style>
+<h1>Blind comparison</h1><p>Each row shows one prompt in shuffled order. Mark colour that spread onto the wrong
+object, and rate how well each image fits the prompt.</p>
+%(groups)s
+<button id="export">Show ratings</button><textarea id="result" readonly></textarea>
+<script>
+document.getElementById("export").onclick=function(){
+  var out=[];document.querySelectorAll("[data-panel]").forEach(function(p){
+    out.push({group:p.dataset.group,panel:p.dataset.panel,fidelity:+p.querySelector("input[type=range]").value,
+              leakage:p.querySelector("input[type=checkbox]").checked});});
+  document.getElementById("result").value=JSON.stringify(out);};
+</script>"""
+
+
+def build_comparison_page(out_dir, out: Path, seed: int, arms=("stage1", "stage1_plain", "stage1_sar", "stage1_placebo")) -> None:
+    """Same prompt and seed across arms, in shuffled panels. The key is written next to the page."""
+    out_dir = Path(out_dir)
+    rng = random.Random(seed)
+    per_image = {}
+    for arm in arms:
+        for path in sorted((out_dir / arm).glob("*/image.png")):
+            per_image.setdefault(path.parent.name, {})[arm] = path
+    groups, key = [], {}
+    ids = [i for i, found in sorted(per_image.items()) if len(found) == len(arms)]
+    rng.shuffle(ids)
+    for n, image in enumerate(ids):
+        group = hashlib.sha256(f"{seed}|group|{n}".encode()).hexdigest()[:10]
+        found = per_image[image]
+        with open(found[arms[0]].parent / "meta.json") as f:
+            prompt = json.load(f)["prompt"]
+        order = list(arms)
+        rng.shuffle(order)
+        panels = []
+        key[group] = {}
+        for letter, arm in zip("ABCDEFGH", order):
+            key[group][letter] = arm
+            panels.append(f'<figure data-panel="{letter}" data-group="{group}"><figcaption>{letter}</figcaption>'
+                          f'<img alt="panel {letter}" src="data:image/jpeg;base64,{_encode(found[arm])}">'
+                          '<label>Fits the prompt (0 to 100)<input type="range" min="0" max="100" value="50"></label>'
+                          '<label><input type="checkbox"> Colour on the wrong object</label></figure>')
+        groups.append(f"<section><h2>{html.escape(prompt)}</h2><div class=panels>{''.join(panels)}</div></section>")
+    out = Path(out)
+    out.write_text(COMPARE_PAGE % {"groups": "\n".join(groups)}, encoding="utf-8")
+    with open(out.with_suffix(".key.json"), "w") as f:
+        json.dump(key, f, indent=1)
+
+
 def score_m1(ratings: Path, key: Path, out_dir: Path, settings) -> dict:
     """M1 pass bar of the spec, from the run's metadata and the blind ratings.
 

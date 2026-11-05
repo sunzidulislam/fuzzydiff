@@ -100,6 +100,15 @@ def test_nonfinite_gradient_only_is_caught():
     assert "nonfinite" in out.rejections and out.accepted is False and torch.isfinite(out.latent_next).all()
 
 
+def test_loss_with_no_path_to_the_latent_falls_back_to_euler():
+    def constant(backend, x0, out, program, bin):
+        return Evidence(x0=x0, scene={"scene_lightness": torch.tensor(50.0, dtype=torch.float64)})
+
+    out = _step(_ctx(tiny_backend(), constant, targets={0: (0.9, 1.0)}))
+    assert out.accepted is False and "small_gradient" in out.rejections
+    assert close(out.latent_next, out.latent + (out.sigma_next - out.sigma) * out.v_plain)
+
+
 class Worse(ProvisionalCalibration):
     """Reports every candidate as worse: evidence measured without gradients scores below the scale."""
 

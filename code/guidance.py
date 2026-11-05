@@ -171,6 +171,9 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
         tiers = sorted(losses)
         raw = {}
         for k, m in enumerate(tiers):
+            if not losses[m].requires_grad:
+                raw[m] = torch.zeros_like(leaf)     # e.g. a term whose evidence has no path to the latent
+                continue
             g, = torch.autograd.grad(losses[m], leaf, retain_graph=k < len(tiers) - 1, allow_unused=True)
             raw[m] = torch.zeros_like(leaf) if g is None else g
         total = sum(losses.values()).detach()
@@ -252,15 +255,15 @@ def _accumulate_trace(sums, counts, evidence):
             counts[q] = counts.get(q, 0) + 1
 
 
-def _finals(ctx, x0, b):
-    """Scores of every constraint on the final image, under the last bin's calibration."""
-    evidence = ctx.measure(ctx.backend, x0, None, ctx.program, b)
+def score_image(program, measure, backend, calib, x, state, targets=None):
+    """Scores of every constraint on a finished image, under the last bin's calibration."""
+    evidence = measure(backend, x, None, program, BINS)
     records = []
-    for f in freeze_step(ctx.program, evidence, ctx.calib, b, ctx.state, ctx.targets):
+    for f in freeze_step(program, evidence, calib, BINS, state, targets):
         if f.constraint.family == "binding":
             continue                        # attention needs a backbone pass; the final image has none
-        ok = in_domain(f, evidence, ctx.calib)
-        s = score(f, evidence, ctx.calib) if ok else None
+        ok = in_domain(f, evidence, calib)
+        s = score(f, evidence, calib) if ok else None
         records.append({"family": f.constraint.family, "cid": f.cid, "component": f.component, "tier": f.tier,
                         "s": float(s.detach()) if ok else None, "low": f.low, "high": f.high,
                         "mu": float(membership(s, f.low, f.high, f.kappa).detach()) if ok else 0.0,
@@ -298,7 +301,7 @@ def run_stage1(backend, program, cond, seed, calib, measure, cfg: GuideCfg, log,
     state.step = cfg.steps
     with torch.no_grad():
         image = backend.decode(z)
-        finals, evidence = _finals(ctx, image, BINS)
+        finals, evidence = score_image(program, measure, backend, calib, image, state, targets)
     supports = {q: o["S"].detach().cpu() for q, o in evidence.objects.items() if "S" in o}
     presence = {q: float(o["p"]) for q, o in evidence.objects.items() if "p" in o}
     traces = {q: sums[q] / counts[q] for q in sums}

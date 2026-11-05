@@ -250,7 +250,7 @@ class FakeSupport:
 
     def __call__(self, x, phrases):
         if callable(self.masks):
-            return {p: self.masks(p, x) for p in phrases}
+            return {p: self.masks(p, _chw(x)) for p in phrases}
         return {p: self.masks[p].to(_chw(x).device, _chw(x).dtype) for p in phrases}
 
 

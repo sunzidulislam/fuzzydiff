@@ -4,10 +4,14 @@ Each image is written into a temporary directory and published by one atomic ren
 <out>/<arm>/<image id>/ (image.png, meta.json, log.jsonl). A finished directory is never redone; a
 failed one is retried on the next run; a temporary directory left by a dead session is discarded.
 
+Stage-2 arms reuse the latent and attention traces the `stage1` arm saved for the same prompt and
+seed, so every arm refines the same Stage-1 image from the same re-noised latent.
+
 Usage:
   python -I code/run_experiment.py --suite m1_tune --out outputs/m1_tune
   python -I code/run_experiment.py --suite m1_eval --out outputs/m1 [--resume-from DIR] [--vae-device cuda:1]
-  python -I code/run_experiment.py --suite m1_eval --tiny --out outputs/smoke
+  python -I code/run_experiment.py --suite mixture --group dev --n 20 --out outputs/sar
+  python -I code/run_experiment.py --suite mixture --group dev --n 2 --tiny --out outputs/smoke
 """
 from __future__ import annotations
 
@@ -31,18 +35,27 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from calibration import ProvisionalCalibration  # noqa: E402
+from constraints import new_state  # noqa: E402
+from estimators import ClipSegSupport, FakeSigLIP, FakeSupport, SigLIPEvidence  # noqa: E402
 from grounding import phrase_spans  # noqa: E402
-from guidance import GuideCfg, run_stage1  # noqa: E402
-from measure import measure_scene  # noqa: E402
+from guidance import GuideCfg, Stage1Out, run_stage1, score_image  # noqa: E402
+from measure import EstimatorDeps, Measure, measure_scene  # noqa: E402
 from predicates import Constraint, Program, translate  # noqa: E402
-from prompts import enumerate_suite  # noqa: E402
+from prompts import enumerate_suite, select  # noqa: E402
 from reporting import StepLog  # noqa: E402
+from sar import SarCfg, build_priors, run_stage2  # noqa: E402
 from sd3_backend import load_backend, tiny_backend  # noqa: E402
 from settings import load_settings  # noqa: E402
 
 COMMANDED = {"darker": -1, "brighter": +1}
 TARGET_BAND = 0.02
 UNGUIDED_ARMS = {"unguided", "ladder_unguided"}
+STAGE2_MODES = {"stage1_plain": "plain", "stage1_sar": "sar", "stage1_placebo": "sar"}
+COMPARISON_ARMS = ("stage1", "stage1_plain", "stage1_sar", "stage1_placebo")
+
+
+class JobFailure(RuntimeError):
+    """An expected reason a job cannot run; its message becomes the failure code."""
 
 
 @dataclass
@@ -61,12 +74,15 @@ class Job:
 class Deps:
     backend: object
     calib: object
-    measure: Callable
+    measure: Optional[Callable]
     cfg: GuideCfg
     settings: object
     stage1: Callable = run_stage1
     unload_text: bool = False
     measure_factory: Optional[Callable] = None     # (prompt, cond) -> measure; needs phrase readout
+    seg: object = None
+    sar_cfg: Optional[SarCfg] = None
+    jobs: List[Job] = field(default_factory=list)
 
 
 @dataclass
@@ -88,6 +104,16 @@ def commanded_targets(unguided_s, shift, margin, headroom):
     if abs(target - unguided_s) < headroom:
         return None
     return (target - TARGET_BAND, target + TARGET_BAND)
+
+
+def placebo_source(job: Job, jobs: List[Job]) -> Optional[Job]:
+    """Next job of the same suite, group, seed, and object count with a different prompt."""
+    same = [j for j in jobs if j.arm == job.arm and j.suite == job.suite and j.split == job.split
+            and j.seed == job.seed and len(j.program.objects) == len(job.program.objects)]
+    if job not in same:
+        return None
+    i = same.index(job)
+    return next((j for j in same[i + 1:] + same[:i] if j.prompt != job.prompt), None)
 
 
 def _is_finished(path: Path) -> bool:
@@ -134,6 +160,55 @@ def _cond(job: Job, deps: Deps):
     return deps.backend.encode_prompt(job.prompt, spans)
 
 
+def _save_stage1(result, tmp):
+    torch.save({"latent": result.latent.detach().cpu(), "traces": {k: v.cpu() for k, v in result.traces.items()},
+                "supports": {k: v.cpu() for k, v in result.supports.items()}, "finals": result.finals,
+                "presence": result.presence}, tmp / "stage1.pt")
+
+
+def _load_stage1(out: Path, prompt: str, seed: int, backend) -> Stage1Out:
+    path = out / "stage1" / image_id(prompt, seed) / "stage1.pt"
+    if not path.exists():
+        raise JobFailure("missing_stage1")
+    data = torch.load(path, weights_only=True)
+    latent = data["latent"].to(backend.tf_device, backend.latent_dtype)
+    with torch.no_grad():
+        image = backend.decode(latent)
+    return Stage1Out(latent, image, data["traces"], data["supports"], data["finals"], data["presence"])
+
+
+def _placebo_priors(job, deps, out, cond):
+    source = placebo_source(job, deps.jobs)
+    if source is None:
+        raise JobFailure("no_placebo_source")
+    other = _load_stage1(out, source.prompt, source.seed, deps.backend)
+    built = build_priors(other.traces, other.supports, deps.sar_cfg)
+    priors = {}
+    for mine, theirs in zip(job.program.objects, source.program.objects):
+        if theirs in built:
+            priors[mine] = built[theirs]
+    return priors, source.prompt
+
+
+def _run_stage2_arm(job, deps, out, tmp, meta, cond, measure, log):
+    mode = STAGE2_MODES[job.arm]
+    stage1 = _load_stage1(out, job.prompt, job.seed, deps.backend)
+    priors = None
+    if job.arm == "stage1_placebo":
+        priors, meta["placebo_from"] = _placebo_priors(job, deps, out, cond)
+    result = run_stage2(deps.backend, stage1, cond, job.program, job.prompt, deps.calib, deps.seg, deps.sar_cfg, job.seed, log,
+                        mode=mode, measure=measure, steps=deps.cfg.steps, priors=priors)
+    with torch.no_grad():
+        finals, _ = score_image(job.program, measure, deps.backend, deps.calib, result.image,
+                                new_state(**deps.cfg.state_kw))
+    meta.update(finals=finals, used_fallback=result.used_fallback, fallback_reason=result.fallback_reason,
+                rollbacks=result.rollbacks, disabled=sorted(result.disabled),
+                fallback_objects=sorted(result.fallback_objects), suspended_steps=result.suspended_steps,
+                passes=result.passes,
+                renoised_sha=hashlib.sha256(result.renoised.detach().cpu().numpy().tobytes()).hexdigest()[:16])
+    return result.image, finals
+
+
 def _execute(job: Job, deps: Deps, out: Path, tmp: Path) -> dict:
     """Run one job into tmp; returns its metadata."""
     meta = {"arm": job.arm, "prompt": job.prompt, "seed": job.seed, "split": job.split, "suite": job.suite,
@@ -144,7 +219,7 @@ def _execute(job: Job, deps: Deps, out: Path, tmp: Path) -> dict:
     if job.arm.split("@")[0] in COMMANDED:
         base = _read_meta(out, job.base_arm, job)
         if base is None:
-            raise LookupError(f"missing {job.base_arm} image for {job.prompt!r} seed {job.seed}")
+            raise JobFailure(f"missing_{job.base_arm}")
         base_finals = base["finals"]
         s = base_finals[0]["s"]
         shift = COMMANDED[job.arm.split("@")[0]] * deps.settings.get("cfgGVShift")
@@ -155,10 +230,10 @@ def _execute(job: Job, deps: Deps, out: Path, tmp: Path) -> dict:
             return meta
         targets = {0: band}
         meta["ds"] = (band[0] + band[1]) / 2 - s
-    if job.arm in UNGUIDED_ARMS:
+    elif job.arm in UNGUIDED_ARMS:
         cfg = dataclasses.replace(cfg, guided=False)
-    elif job.arm == "ladder_guided":
-        base = _read_meta(out, "ladder_unguided", job)
+    else:
+        base = _read_meta(out, "ladder_unguided" if job.arm == "ladder_guided" else job.base_arm, job)
         base_finals = base["finals"] if base else None
 
     cond = _cond(job, deps)
@@ -169,15 +244,21 @@ def _execute(job: Job, deps: Deps, out: Path, tmp: Path) -> dict:
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     try:
-        result = deps.stage1(deps.backend, job.program, cond, job.seed, deps.calib, measure, cfg, log,
-                             targets=targets, prompt=job.prompt)
-        _final_records(job, result.finals, base_finals, log)
+        if job.arm in STAGE2_MODES:
+            image, finals = _run_stage2_arm(job, deps, out, tmp, meta, cond, measure, log)
+        else:
+            result = deps.stage1(deps.backend, job.program, cond, job.seed, deps.calib, measure, cfg, log,
+                                 targets=targets, prompt=job.prompt)
+            image, finals = result.image, result.finals
+            if job.arm == "stage1":
+                _save_stage1(result, tmp)
+        _final_records(job, finals, base_finals, log)
     finally:
         log.close()
-    _save_image(result.image, tmp / "image.png")
-    meta.update(finals=result.finals, time_s=time.perf_counter() - start, peak_gb=_peak_gb())
+    _save_image(image, tmp / "image.png")
+    meta.update(finals=finals, time_s=time.perf_counter() - start, peak_gb=_peak_gb())
     if "ds" in meta:
-        meta["dy"] = result.finals[0]["s"] - base_finals[0]["s"]
+        meta["dy"] = finals[0]["s"] - base_finals[0]["s"]
     return meta
 
 
@@ -185,15 +266,17 @@ def run_image(job: Job, deps: Deps, out: Path) -> dict:
     """Publish one image atomically. Out-of-memory and other errors become a failure record."""
     tmp = out / f".tmp-{uuid.uuid4().hex}"
     tmp.mkdir(parents=True)
+    head = {"arm": job.arm, "prompt": job.prompt, "seed": job.seed}
     try:
         meta = _execute(job, deps, out, tmp)
     except torch.cuda.OutOfMemoryError:
-        meta = {"arm": job.arm, "prompt": job.prompt, "seed": job.seed, "failed": "oom", "peak_gb": _peak_gb()}
+        meta = {**head, "failed": "oom", "peak_gb": _peak_gb()}
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+    except JobFailure as e:
+        meta = {**head, "failed": str(e)}
     except Exception as e:
-        meta = {"arm": job.arm, "prompt": job.prompt, "seed": job.seed, "failed": type(e).__name__,
-                "error": str(e), "traceback": traceback.format_exc()}
+        meta = {**head, "failed": type(e).__name__, "error": str(e), "traceback": traceback.format_exc()}
     with open(tmp / "meta.json", "w") as f:
         json.dump(meta, f, indent=1)
     dest = out / job.arm / image_id(job.prompt, job.seed)
@@ -209,6 +292,7 @@ def run_jobs(jobs: List[Job], deps: Deps, out, resume_from=None) -> Summary:
     out.mkdir(parents=True, exist_ok=True)
     for stale in out.glob(".tmp-*"):
         shutil.rmtree(stale, ignore_errors=True)
+    deps.jobs = jobs
     summary = Summary()
     pending = []
     for job in jobs:
@@ -248,6 +332,29 @@ def merge_logs(out_dir, into) -> int:
     return n
 
 
+def summarize_arms(out_dir) -> Dict[str, dict]:
+    """Per arm: what happened, including how often SAR rolled back or fell back to Stage 1."""
+    metas: Dict[str, List[dict]] = {}
+    for path in Path(out_dir).glob("*/*/meta.json"):
+        with open(path) as f:
+            meta = json.load(f)
+        metas.setdefault(meta.get("arm", path.parts[-3]), []).append(meta)
+
+    def mean(rows, key):
+        values = [r[key] for r in rows if isinstance(r.get(key), (int, float))]
+        return sum(values) / len(values) if values else 0.0
+
+    out = {}
+    for arm, rows in sorted(metas.items()):
+        done = [r for r in rows if "failed" not in r]
+        out[arm] = {"n": len(done), "failed": len(rows) - len(done),
+                    "fallback_rate": mean([{"x": float(bool(r.get("used_fallback")))} for r in done], "x"),
+                    "rollbacks": mean(done, "rollbacks"), "suspended_steps": mean(done, "suspended_steps"),
+                    "disabled": mean([{"x": len(r.get("disabled", []))} for r in done], "x"),
+                    "passes": mean(done, "passes"), "time_s": mean(done, "time_s"), "peak_gb": mean(done, "peak_gb")}
+    return out
+
+
 def _scene_program(noun):
     return Program(objects=[], constraints=[Constraint("F2a", (noun,), None, "scene_lightness", 1)])
 
@@ -283,6 +390,17 @@ def m1_jobs(tune: bool) -> List[Job]:
     return jobs
 
 
+def arm_jobs(rows, seeds, arms) -> List[Job]:
+    """Arms in the given order, so Stage 1 of every prompt finishes before any Stage-2 arm starts."""
+    jobs = []
+    for arm in arms:
+        for r in rows:
+            for seed in seeds:
+                base = "unguided"
+                jobs.append(Job(arm, r.prompt, seed, r.group, r.suite, r.program, base_arm=base))
+    return jobs
+
+
 def guide_cfg(s) -> GuideCfg:
     return GuideCfg(steps=s.get("cfgSteps", int), cfg=s.get("cfgCFG"), sigma_lo=s.get("cfgSigmaLo"),
                     eta0=s.get("cfgEtaZero"), delta=s.get("cfgDelta"), dmax=s.get("cfgMaxPert"),
@@ -293,10 +411,26 @@ def guide_cfg(s) -> GuideCfg:
                               "band": s.get("cfgDomBand"), "lam": s.get("cfgLambda")})
 
 
+def sar_cfg(s) -> SarCfg:
+    return SarCfg(strength=s.get("cfgStrength"), k=s.get("cfgKSteps", int), alpha=s.get("cfgAlpha"), beta=s.get("cfgBeta"),
+                  temp=s.get("cfgTemp"), gamma_min=s.get("cfgGammaMin"), overlap=s.get("cfgOverlap"), nest=s.get("cfgNest"))
+
+
+def _tiny_estimators():
+    def mask(phrase, x):
+        return torch.nn.functional.adaptive_avg_pool2d(x[None], 64)[0].mean(0)
+
+    return FakeSupport(mask), FakeSigLIP(lambda phrase, image: image.mean() * 2 + 0.5)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--suite", required=True, choices=["m1_tune", "m1_eval"])
+    ap.add_argument("--suite", required=True, choices=["m1_tune", "m1_eval", "plain_color", "mixture", "size", "soft"])
     ap.add_argument("--out", required=True)
+    ap.add_argument("--group", default="dev")
+    ap.add_argument("--n", type=int, default=20, help="prompts per suite (suites other than M1)")
+    ap.add_argument("--seeds", default="0")
+    ap.add_argument("--arms", default="unguided," + ",".join(COMPARISON_ARMS))
     ap.add_argument("--resume-from", default=None)
     ap.add_argument("--model", default="stabilityai/stable-diffusion-3-medium-diffusers")
     ap.add_argument("--tf-device", default="cuda:0")
@@ -308,19 +442,34 @@ def main():
     args = ap.parse_args()
 
     s = load_settings()
-    cfg = guide_cfg(s)
+    cfg, sar = guide_cfg(s), sar_cfg(s)
+    calib = ProvisionalCalibration(s)
     if args.tiny:
         backend = tiny_backend()
         cfg = dataclasses.replace(cfg, steps=2)
+        sar = dataclasses.replace(sar, k=1)
     else:
         backend = load_backend(args.model, s.get("cfgReadBlocks", list), s.get("cfgSARBlocks", list), args.tf_device,
                                args.vae_device, getattr(torch, args.dtype), s.get("cfgCFG"), args.resolution)
-    jobs = m1_jobs(args.suite == "m1_tune")[:args.limit]
-    deps = Deps(backend, ProvisionalCalibration(s), measure_scene, cfg, s, unload_text=not args.tiny)
-    result = run_jobs(jobs, deps, args.out, resume_from=args.resume_from)
+    if args.suite.startswith("m1"):
+        jobs = m1_jobs(args.suite == "m1_tune")
+        deps = Deps(backend, calib, measure_scene, cfg, s, unload_text=not args.tiny)
+    else:
+        rows = select(args.suite, args.group, args.n)
+        jobs = arm_jobs(rows, [int(x) for x in args.seeds.split(",")], args.arms.split(","))
+        if args.tiny:
+            seg, siglip = _tiny_estimators()
+        else:
+            device = args.vae_device or args.tf_device
+            seg = ClipSegSupport.from_pretrained(s.get("cfgCLIPSeg", str), device)
+            siglip = SigLIPEvidence.from_pretrained(s.get("cfgSigLIP", str), device)
+        estimators = EstimatorDeps(seg, siglip, calib, s)
+        deps = Deps(backend, calib, None, cfg, s, unload_text=not args.tiny, seg=seg, sar_cfg=sar,
+                    measure_factory=lambda prompt, cond: Measure(estimators, prompt, cond))
+    result = run_jobs(jobs[:args.limit], deps, args.out, resume_from=args.resume_from)
     n = merge_logs(args.out, Path(args.out) / "all.jsonl")
     print(json.dumps({"done": result.done, "skipped": result.skipped, "failed": result.failed,
-                      "failures": result.failures[:20], "log_records": n}, indent=1))
+                      "failures": result.failures[:20], "log_records": n, "arms": summarize_arms(args.out)}, indent=1))
     sys.exit(1 if result.failed else 0)
 
 

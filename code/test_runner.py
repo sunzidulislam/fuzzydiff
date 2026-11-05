@@ -10,12 +10,15 @@ import torch
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from annotate import build_rating_page, score_m1  # noqa: E402
+from annotate import build_comparison_page, build_rating_page, score_m1  # noqa: E402
 from calibration import ProvisionalCalibration  # noqa: E402
 from guidance import GuideCfg, run_stage1  # noqa: E402
-from measure import measure_scene  # noqa: E402
-from predicates import Constraint, Program  # noqa: E402
-from run_experiment import (Deps, Job, commanded_targets, image_id, m1_jobs, merge_logs, run_jobs)  # noqa: E402
+from estimators import FakeSigLIP, FakeSupport  # noqa: E402
+from measure import EstimatorDeps, Measure, measure_scene  # noqa: E402
+from predicates import Constraint, Program, translate  # noqa: E402
+from run_experiment import (Deps, Job, arm_jobs, commanded_targets, image_id, m1_jobs, merge_logs, placebo_source,  # noqa: E402
+                            run_jobs, summarize_arms)
+from sar import SarCfg  # noqa: E402
 from sd3_backend import tiny_backend  # noqa: E402
 from settings import load_settings  # noqa: E402
 
@@ -169,6 +172,110 @@ def test_score_m1_against_known_outcome():
         r = score_m1(tmp / "ratings.json", tmp / "rate.key.json", tmp, SETTINGS)
         assert r["dir_accuracy"] == 1.0 and abs(r["transfer_slope"] - 2 / 3) < 1e-9
         assert r["human_direction_agreement"] == 1.0 and r["broken_share"] == 0.0 and r["passed"] is True
+    with_tmp(body)
+
+
+def _blob(a, b):
+    m = torch.zeros(64, 64, dtype=torch.float64)
+    m[a:a + 16, b:b + 16] = 1
+    return m
+
+
+MASKS = {"mug": _blob(10, 10), "teapot": _blob(40, 40), "vase": _blob(10, 40), "lamp": _blob(40, 10), "chair": _blob(30, 30)}
+SAR_CFG = SarCfg(strength=0.5, k=1, alpha=1.0, beta=0.5, temp=0.1, gamma_min=0.3, overlap=0.3, nest=0.8)
+
+
+def four_arm_deps(stage1=run_stage1):
+    calib = ProvisionalCalibration(SETTINGS)
+    seg = FakeSupport(MASKS)
+    est = EstimatorDeps(seg, FakeSigLIP(lambda phrase, image: 1.0), calib, SETTINGS)
+    return Deps(backend=tiny_backend(read_blocks=(0, 1)), calib=calib, measure=None, cfg=CFG, settings=SETTINGS, stage1=stage1,
+                measure_factory=lambda prompt, cond: Measure(est, prompt, cond), seg=seg, sar_cfg=SAR_CFG)
+
+
+def rows():
+    from prompts import PromptRow
+    return [PromptRow(p, p, "dev", "plain_color") for p in ("a red mug and a blue teapot", "a green vase and a pink lamp")]
+
+
+def test_arms_share_stage1_and_renoising():
+    runs = []
+
+    def counted(*a, **k):
+        runs.append(1)
+        return run_stage1(*a, **k)
+
+    def body(tmp):
+        jobs_ = arm_jobs(rows()[:2], (0,), ["unguided", "stage1", "stage1_plain", "stage1_sar", "stage1_placebo"])
+        s = run_jobs(jobs_, four_arm_deps(counted), tmp)
+        assert s.failed == 0, s.failures
+        assert len(runs) == 4                                    # unguided and stage1 per prompt, none for Stage 2
+        i = image_id(rows()[0].prompt, 0)
+        metas = {a: json.load(open(tmp / a / i / "meta.json")) for a in ("stage1_plain", "stage1_sar", "stage1_placebo")}
+        assert len({m["renoised_sha"] for m in metas.values()}) == 1
+        assert metas["stage1_placebo"]["placebo_from"] == rows()[1].prompt
+        assert metas["stage1_sar"]["passes"] > metas["stage1_plain"]["passes"]
+        assert (tmp / "stage1" / i / "stage1.pt").exists()
+    with_tmp(body)
+
+
+def _job(prompt, arm="stage1_placebo"):
+    return Job(arm, prompt, 0, "dev", "plain_color", translate(prompt))
+
+
+def test_placebo_uses_another_image_same_object_count():
+    a, same, other = _job("a red mug and a blue teapot"), _job("a green vase and a pink lamp"), _job("a red chair")
+    assert placebo_source(a, [a, same, other]) is same
+    assert placebo_source(other, [a, same, other]) is None
+
+
+def test_placebo_without_match_records_failure():
+    def body(tmp):
+        lone = [PromptRow_("a red mug and a blue teapot")]
+        s = run_jobs(arm_jobs(lone, (0,), ["stage1", "stage1_placebo"]), four_arm_deps(), tmp)
+        assert s.failed == 1
+        meta = json.load(open(tmp / "stage1_placebo" / image_id(lone[0].prompt, 0) / "meta.json"))
+        assert meta["failed"] == "no_placebo_source"
+    with_tmp(body)
+
+
+def PromptRow_(p):
+    from prompts import PromptRow
+    return PromptRow(p, p, "dev", "plain_color")
+
+
+def test_stage2_without_stage1_fails_clearly():
+    def body(tmp):
+        s = run_jobs(arm_jobs(rows()[:1], (0,), ["stage1_sar"]), four_arm_deps(), tmp)
+        assert s.failed == 1 and "stage1" in s.failures[0].lower()
+    with_tmp(body)
+
+
+def test_resume_after_stage1_only_redoes_stage2():
+    runs = []
+
+    def counted(*a, **k):
+        runs.append(1)
+        return run_stage1(*a, **k)
+
+    def body(tmp):
+        run_jobs(arm_jobs(rows()[:1], (0,), ["stage1"]), four_arm_deps(counted), tmp)
+        s = run_jobs(arm_jobs(rows()[:1], (0,), ["stage1", "stage1_plain"]), four_arm_deps(counted), tmp)
+        assert s.skipped == 1 and s.done == 1 and len(runs) == 1
+    with_tmp(body)
+
+
+def test_summary_and_blind_page():
+    def body(tmp):
+        run_jobs(arm_jobs(rows(), (0,), ["stage1", "stage1_plain", "stage1_sar", "stage1_placebo"]), four_arm_deps(), tmp)
+        s = summarize_arms(tmp)
+        assert {"fallback_rate", "rollbacks", "suspended_steps", "n", "time_s"} <= set(s["stage1_sar"])
+        assert s["stage1_sar"]["n"] == 2
+        build_comparison_page(tmp, tmp / "c.html", 0)
+        html = (tmp / "c.html").read_text()
+        assert "stage1_sar" not in html and "placebo" not in html and "a red mug" in html
+        key = json.load(open(tmp / "c.key.json"))
+        assert all(set(v.values()) == {"stage1", "stage1_plain", "stage1_sar", "stage1_placebo"} for v in key.values())
     with_tmp(body)
 
 
