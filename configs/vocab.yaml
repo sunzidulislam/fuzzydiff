@@ -1,0 +1,24 @@
+# Prompt vocabularies of the evaluation suites. Group membership is decided by prompts.assign_group,
+# never by position in these lists. Changing a list changes which prompts exist, not their groups.
+objects: [mug, teapot, vase, chair, lamp, towel, candle, bottle, kitten, pillow,
+          bowl, plate, book, backpack, umbrella, clock, guitar, bench, bicycle, sofa,
+          hat, shoe, suitcase, basket, kettle, cushion, blanket, jar, puppy, rabbit,
+          apple, pumpkin, cactus, drum, helmet, mirror, radio, stool, tent, toaster]
+test_only_objects: [lantern, trumpet, wallet, barrel]
+hedges: [barely, slightly, somewhat, moderately, considerably, very, nearly, extremely]
+soft_attributes: [dark, bright, pale, vivid, faded, muted, saturated,
+                  red, blue, green, yellow, orange, purple, pink]
+contexts: ["", on a wooden table, on a wooden shelf, on a stone floor, in a garden, on a beach,
+           near a window, on a bed, in a park, on a rug, on a desk, on a bench]
+mixture_terms: [greenish-gray, turquoise-green, coral-orange, bluish-purple, pinkish-white, reddish-brown,
+                yellowish-green, bluish-green, grayish-blue, orange-red, purple-pink, yellowish-orange]
+mixture_objects: 24   # first N objects
+comparatives: [larger, smaller]
+plain_colors: [red, blue, green, yellow, orange, purple, pink, white, black]
+plain_objects: [mug, teapot, vase, chair, lamp, book]
+m1_tune: [bakery, attic, cellar, chapel, lobby]
+m1_eval: [bedroom, kitchen, hallway, garage, office, classroom, library, studio, barn, cabin,
+          gym, diner, museum, corridor, workshop, greenhouse, pantry, nursery, laundromat, restaurant]
+m1_ladder_degrees: [dimly lit, moderately lit, brightly lit]
+m1_ladder_nouns: [bedroom, kitchen, hallway]
+group_shares: {cal: 0.40, int: 0.10, sys: 0.15, cons: 0.10, dev: 0.05, test: 0.20}
