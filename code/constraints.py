@@ -18,6 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from calibration import domain_weight, ramp_weight  # noqa: E402
 from predicates import Constraint  # noqa: E402
 
+EPS_C = 1e-6
+
 
 @dataclass
 class Evidence:
@@ -57,6 +59,7 @@ class StepState:
     first_valid: Dict[str, int] = field(default_factory=dict)
     unguided: set = field(default_factory=set)
     size_regime: Dict[int, str] = field(default_factory=dict)
+    size_bounds: Dict[int, tuple] = field(default_factory=dict)
 
 
 def new_state(**kw) -> StepState:
@@ -102,6 +105,10 @@ class Scorer:
 
     def interval(self, c, calib, component):
         return calib.interval(c.family, c.quantity, c.hedge, c.orientation)
+
+    def resolve(self, cid, c, evidence, calib, state, low, high, kappa, gates):
+        """Last word on the frozen interval; a family may change it or close a gate."""
+        return low, high, kappa
 
     def gates(self, c, evidence, calib, state, component):
         """Family-specific gates; validity and domain are handled by freeze_step."""
@@ -230,8 +237,59 @@ class Mixture(Scorer):
         return gates
 
 
+def size_regime(low, high, c68, c95) -> str:
+    """App. F8: tested in this order on nonnegative thresholds, so larger and smaller behave alike."""
+    if c95 > high:
+        return "unmeasurable"
+    if (high - low) / 2 >= 2 * c68:
+        return "graded"
+    return "direction"
+
+
+def oriented_m(g_q, g_r, orientation, eps=EPS_C):
+    """m = o * log ratio: positive exactly when the stated relation holds."""
+    return orientation * (torch.log(g_q + eps) - torch.log(g_r + eps))
+
+
+class Size(Scorer):
+    """F8: apparent relative size. The regime is decided once, at the first step both objects pass."""
+
+    def _m(self, c, evidence):
+        pair = evidence.pairs.get(("F8", c.args[0], c.args[1], c.quantity))
+        return None if pair is None else oriented_m(pair[0], pair[1], c.orientation)
+
+    def raw(self, c, evidence, component):
+        return self._m(c, evidence)
+
+    def domain(self, c, calib, bin, component):
+        return (-math.inf, math.inf)
+
+    def score(self, c, evidence, calib, bin, component):
+        return self._m(c, evidence)
+
+    def gates(self, c, evidence, calib, state, component):
+        objs = [evidence.objects.get(q) for q in c.args]
+        present = all(o is not None and float(o["p"]) >= state.p_gate for o in objs)
+        support = all(_support_gate(q, evidence, state) for q in c.args)
+        return {"presence": present, "support": support, "confidence": True}
+
+    def resolve(self, cid, c, evidence, calib, state, low, high, kappa, gates):
+        if cid not in state.size_regime and all(gates.values()):
+            c68, c95 = calib.size_quantiles({"A_q": evidence.objects[c.args[0]]["A"],
+                                             "A_r": evidence.objects[c.args[1]]["A"]})
+            regime = size_regime(low, high, c68, c95)
+            state.size_regime[cid] = regime
+            width = math.sqrt(kappa ** 2 + c68 ** 2)
+            state.size_bounds[cid] = (low, high, width) if regime == "graded" else (c95, math.inf, width)
+        if cid in state.size_regime:
+            low, high, kappa = state.size_bounds[cid]
+            if state.size_regime[cid] == "unmeasurable":
+                gates["validity"] = False
+        return low, high, kappa
+
+
 FAMILY_SCORERS: Dict[str, Scorer] = {"F2a": Photometric(), "presence": Presence(), "binding": Binding(),
-                                     "leakage": Leakage(), "F6": Mixture()}
+                                     "leakage": Leakage(), "F6": Mixture(), "F8": Size()}
 
 
 def scorer_for(c: Constraint) -> Optional[Scorer]:
@@ -263,7 +321,7 @@ def freeze_step(program, evidence, calib, bin, state: StepState, targets=None) -
             raw = sc.raw(c, evidence, component)
             lo, hi = sc.domain(c, calib, bin, component)
             gates["domain"] = _inside(raw, lo, hi)
-            low, high, kappa = sc.interval(c, calib, component)
+            low, high, kappa = sc.resolve(cid, c, evidence, calib, state, *sc.interval(c, calib, component), gates)
             if targets and cid in targets:
                 low, high = targets[cid]
             weight = 0.0

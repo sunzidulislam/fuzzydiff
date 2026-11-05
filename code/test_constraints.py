@@ -8,8 +8,8 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from calibration import ProvisionalCalibration  # noqa: E402
 from constraints import (Evidence, charbonnier, freeze_step, in_domain, membership, new_state,  # noqa: E402
-                         score, tier_losses, violation)
-from predicates import Constraint, Program  # noqa: E402
+                         oriented_m, score, size_regime, tier_losses, violation)
+from predicates import Constraint, Program, translate  # noqa: E402
 from settings import load_settings  # noqa: E402
 
 PROV = ProvisionalCalibration(load_settings())
@@ -91,6 +91,73 @@ def test_family_without_a_scorer_is_recorded_not_guided():
     st = new_state()
     assert freeze_step(prog, evidence_with_L(50.0), PROV, 4, st) == []
     assert "F9" in st.unguided
+
+
+def size_prog(hedge="moderately", comp="larger"):
+    p = translate(f"a kitten {hedge} {comp} than a pillow")
+    return Program(objects=p.objects, constraints=[c for c in p.constraints if c.family == "F8"])
+
+
+def ev_size(present=True, g_q=0.2, g_r=0.05):
+    p = torch.tensor(0.9 if present else 0.1, dtype=torch.float64)
+    a = torch.tensor(0.1, dtype=torch.float64)
+    objects = {q: {"p": p, "A": a, "psi": 1.0} for q in ("kitten", "pillow")}
+    gq, gr = torch.tensor(g_q, dtype=torch.float64), torch.tensor(g_r, dtype=torch.float64)
+    return Evidence(objects=objects, pairs={("F8", "kitten", "pillow", "area"): (gq, gr)})
+
+
+def test_regime_order():
+    assert size_regime(0.15, 0.3, 0.1, 0.4) == "unmeasurable"
+    assert size_regime(0.5, 1.0, 0.1, 0.2) == "graded"
+    assert size_regime(0.15, 0.3, 0.1, 0.2) == "direction"
+
+
+def test_m_positive_when_relation_holds_both_ways():
+    big, small = torch.tensor(.2), torch.tensor(.05)
+    assert oriented_m(big, small, 1, 1e-6) > 0 and oriented_m(small, big, -1, 1e-6) > 0
+    assert oriented_m(small, big, 1, 1e-6) < 0
+
+
+def test_regime_is_fixed_and_inactive_before_t0():
+    class Shifted(ProvisionalCalibration):
+        def size_quantiles(self, features):
+            return (0.1, 9.0)
+
+    st = new_state()
+    assert not [f for f in freeze_step(size_prog(), ev_size(False), PROV, 2, st) if f.weight > 0] and not st.size_regime
+    first = freeze_step(size_prog(), ev_size(True), PROV, 2, st)[0]
+    r = dict(st.size_regime)
+    assert first.weight > 0 and list(r.values()) == ["graded"]
+    again = freeze_step(size_prog(), ev_size(True), Shifted(load_settings()), 3, st)[0]
+    assert st.size_regime == r and (again.low, again.high) == (first.low, first.high) and again.weight > 0
+
+
+def test_direction_regime_bound_is_c95():
+    f = freeze_step(size_prog("slightly"), ev_size(True), PROV, 2, new_state())[0]
+    assert f.low == 0.2 and math.isinf(f.high)
+
+
+def test_graded_width_includes_measurement_error():
+    f = freeze_step(size_prog(), ev_size(True), PROV, 2, new_state())[0]
+    assert (f.low, f.high) == (0.5, 1.0) and abs(f.kappa - math.sqrt(0.1 ** 2 + 0.1 ** 2)) < 1e-9
+
+
+def test_unmeasurable_gets_no_guidance_and_is_recorded():
+    class Noisy(ProvisionalCalibration):
+        def size_quantiles(self, features):
+            return (0.1, 0.4)
+
+    st = new_state()
+    f = freeze_step(size_prog("slightly"), ev_size(True), Noisy(load_settings()), 2, st)[0]
+    assert f.weight == 0 and st.size_regime[0] == "unmeasurable"
+
+
+def test_size_score_is_signed_and_uses_orientation():
+    ev = ev_size(True, g_q=0.05, g_r=0.2)                       # kitten is visibly smaller
+    wrong = freeze_step(size_prog(comp="larger"), ev, PROV, 2, new_state())[0]
+    right = freeze_step(size_prog(comp="smaller"), ev, PROV, 2, new_state())[0]
+    assert score(wrong, ev, PROV) < 0 < score(right, ev, PROV)
+    assert tier_losses([wrong], ev, PROV)[3] > tier_losses([right], ev, PROV)[3]
 
 
 def main():
