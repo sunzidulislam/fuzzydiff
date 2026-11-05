@@ -29,7 +29,7 @@ hedge_centers:
   very: 0.85
   nearly: 0.90
   extremely: 0.95
-default_center: 0.50
+default_center: 0.70
 hedge_halfwidth: 0.1
 hedge_kappa: 0.1
 size_kappa: 0.1
