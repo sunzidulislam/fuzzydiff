@@ -433,10 +433,12 @@ def _neutral_jobs(suite, seeds, arms):
 def m1_jobs(tune: bool) -> List[Job]:
     if tune:
         arms = [("unguided", {})]
-        for eta0 in (0.02, 0.05, 0.1):
-            for lo in (0.5, 0.25):
+        # At the noisiest steps a push decides what the image shows, not only how bright it is, so
+        # guidance starts later (Kaggle: starting at sigma 1 turned a bakery into a logo).
+        for eta0 in (0.05, 0.02, 0.1):
+            for hi in (0.75, 0.5):
                 for arm in COMMANDED:
-                    arms.append((f"{arm}@eta{eta0}@lo{lo}", {"eta0": eta0, "sigma_lo": lo}))
+                    arms.append((f"{arm}@eta{eta0}@hi{hi}", {"eta0": eta0, "sigma_hi": hi}))
         return _neutral_jobs("m1_tune", (0,), arms)
     jobs = _neutral_jobs("m1_eval", (0, 1), [("unguided", {}), ("darker", {}), ("brighter", {})])
     for arm in ("ladder_unguided", "ladder_guided"):

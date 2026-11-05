@@ -26,7 +26,7 @@ BINS = 4
 class GuideCfg:
     steps: int
     cfg: float
-    sigma_lo: float
+    sigma_lo: float                         # guided on sigma_lo <= sigma <= sigma_hi
     eta0: float
     delta: float
     dmax: float
@@ -38,6 +38,7 @@ class GuideCfg:
     guided: bool = True
     c_sigma: float = 1.0
     log_all: bool = False                   # also measure and log steps without guidance (calibration runs)
+    sigma_hi: float = 1.0
     state_kw: Dict[str, float] = field(default_factory=dict)
 
 
@@ -203,6 +204,9 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
         if not finite:
             rejections.append("nonfinite")
             accepted = False
+        elif float(total) == 0:
+            rejections.append("target_met")         # every active score is inside its interval
+            accepted = False
         elif float(g.double().norm()) < cfg.g_min:
             rejections.append("small_gradient")
             accepted = False
@@ -338,7 +342,7 @@ def run_stage1(backend, program, cond, seed, calib, measure, cfg: GuideCfg, log,
     counts: Dict[str, int] = {}
     for i in range(cfg.steps):
         sigma, sigma_next = sigmas[i], sigmas[i + 1]
-        if cfg.guided and float(sigma) >= cfg.sigma_lo:
+        if cfg.guided and cfg.sigma_lo <= float(sigma) <= cfg.sigma_hi:
             out = guided_step(z, sigma, sigma_next, i, ctx)
             z = out.latent_next
             _accumulate_trace(sums, counts, out.evidence)

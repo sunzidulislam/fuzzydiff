@@ -166,6 +166,27 @@ def test_window_skips_low_noise_steps():
     assert guided_sigmas and all(s >= 0.9 for s in guided_sigmas)
 
 
+def test_guidance_can_start_after_the_noisiest_steps():
+    log = MemoryLog()
+    b = tiny_backend()
+    run_stage1(b, PROGRAM, b.encode_prompt("a room"), 0, PROV, measure,
+               GuideCfg(**{**CFG.__dict__, "sigma_hi": 0.75}), log, targets={0: (0.9, 1.0)})
+    guided_sigmas = [r["sigma"] for r in log.records if r["type"] == "step"]
+    assert guided_sigmas and all(s <= 0.75 for s in guided_sigmas)
+    assert len(guided_sigmas) < CFG.steps
+
+
+def test_a_met_target_is_not_reported_as_a_small_gradient():
+    b = tiny_backend()
+    z = b.noise_like_latent(0)
+    s0 = torch.tensor(0.8, dtype=torch.float64)
+    with torch.no_grad():
+        x0 = b.decode(b.clean(z, s0, b.velocity(z, s0, b.encode_prompt("a room")).v))
+    now = float(scene_lightness(x0)) / 100
+    out = _step(_ctx(b, targets={0: (now - 0.2, now + 0.2)}))
+    assert out.rejections == ["target_met"] and out.accepted is False
+
+
 def test_final_record_has_score_and_mu():
     _, out = _run(False)
     f = out.finals[0]

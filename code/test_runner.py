@@ -152,7 +152,8 @@ def test_m1_job_lists():
     assert {c.family for c in ladder.program.constraints} == {"F2a"}
     tune = m1_jobs(True)
     assert {j.overrides.get("eta0") for j in tune if j.overrides} == {0.02, 0.05, 0.1}
-    assert {j.overrides.get("sigma_lo") for j in tune if j.overrides} == {0.5, 0.25}
+    assert {j.overrides.get("sigma_hi") for j in tune if j.overrides} == {0.75, 0.5}
+    assert tune[5].overrides["eta0"] == 0.05 and tune[5].overrides["sigma_hi"] == 0.75   # the likeliest setting runs first
     assert {j.prompt for j in tune}.isdisjoint({j.prompt for j in ev})
 
 
