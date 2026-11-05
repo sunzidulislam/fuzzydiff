@@ -398,6 +398,24 @@ def test_i11_peak_memory_is_reported_for_every_gpu():
     assert peaks == {"cuda:0": 1.0, "cuda:1": 3.0}
 
 
+def test_i11_a_gpu_that_was_never_used_does_not_fail_the_image():
+    from run_experiment import _reset_peaks
+    original = (torch.cuda.is_available, torch.cuda.device_count, torch.cuda.reset_peak_memory_stats)
+    reset = []
+
+    def fake_reset(i):
+        if i == 1:
+            raise RuntimeError("Invalid device argument 1: did you call init?")
+        reset.append(i)
+
+    torch.cuda.is_available, torch.cuda.device_count, torch.cuda.reset_peak_memory_stats = (lambda: True), (lambda: 2), fake_reset
+    try:
+        _reset_peaks()
+    finally:
+        torch.cuda.is_available, torch.cuda.device_count, torch.cuda.reset_peak_memory_stats = original
+    assert reset == [0]
+
+
 def test_i12_a_finished_step_keeps_no_gradient_graph():
     b = tiny_backend()
     ctx = Stage1Ctx(b, ROOM, b.encode_prompt("a room"), PROV, measure_scene, CFG, new_state(), Log(), {0: (0.9, 1.0)}, "a room", 0)

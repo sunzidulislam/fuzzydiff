@@ -114,7 +114,10 @@ def peak_memory() -> Dict[str, float]:
 def _reset_peaks():
     if torch.cuda.is_available():
         for i in range(torch.cuda.device_count()):
-            torch.cuda.reset_peak_memory_stats(i)
+            try:
+                torch.cuda.reset_peak_memory_stats(i)
+            except RuntimeError:
+                pass                        # a GPU this process has not used yet has no statistics
 
 
 def image_id(prompt: str, seed: int) -> str:
