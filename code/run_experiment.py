@@ -448,6 +448,14 @@ def m1_jobs(tune: bool) -> List[Job]:
     return jobs
 
 
+def only_prompts(jobs: List[Job], prompts) -> List[Job]:
+    """The jobs for exactly these prompts, in their original order."""
+    missing = set(prompts) - {j.prompt for j in jobs}
+    if missing:
+        raise ValueError(f"not in this suite: {sorted(missing)}")
+    return [j for j in jobs if j.prompt in prompts]
+
+
 def arm_jobs(rows, seeds, arms) -> List[Job]:
     """Arms in the given order, so Stage 1 of every prompt finishes before any Stage-2 arm starts."""
     jobs = []
@@ -523,6 +531,7 @@ def main():
     # With CLIPSeg and SigLIP on its GPU, a float32 VAE ran out of memory on a T4 (measured).
     ap.add_argument("--vae-dtype", default="float16", choices=["float16", "float32"])
     ap.add_argument("--tiny", action="store_true", help="smoke test on the tiny random model (CPU)")
+    ap.add_argument("--only-prompt", action="append", help="run only this prompt from the suite; can be repeated")
     ap.add_argument("--limit", type=int, default=None, help="only the first N jobs")
     ap.add_argument("--calibration", default=None, help="fitted calibration file; provisional values if omitted")
     ap.add_argument("--manifest", default=None, help="frozen support manifest; required for --group test")
@@ -562,6 +571,8 @@ def main():
         estimators = EstimatorDeps(seg, siglip, calib, s)
         deps = Deps(backend, calib, None, cfg, s, unload_text=not args.tiny, seg=seg, sar_cfg=sar,
                     measure_factory=lambda prompt, cond: Measure(estimators, prompt, cond))
+    if args.only_prompt:
+        jobs = only_prompts(jobs, args.only_prompt)
     result = run_jobs(jobs[:args.limit], deps, args.out, resume_from=args.resume_from)
     n = merge_logs(args.out, Path(args.out) / "all.jsonl")
     print(json.dumps({"done": result.done, "skipped": result.skipped, "failed": result.failed,

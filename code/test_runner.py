@@ -22,7 +22,7 @@ from estimators import FakeSigLIP, FakeSupport  # noqa: E402
 from measure import EstimatorDeps, Measure, measure_scene  # noqa: E402
 from predicates import Constraint, Program, translate  # noqa: E402
 from run_experiment import (Deps, Job, arm_jobs, commanded_targets, describe_program, image_id, m1_jobs, merge_logs,  # noqa: E402
-                            placebo_source, prompt_rows, run_jobs, summarize_arms)
+                            only_prompts, placebo_source, prompt_rows, run_jobs, summarize_arms)
 from sar import SarCfg  # noqa: E402
 from sd3_backend import tiny_backend  # noqa: E402
 from settings import load_settings  # noqa: E402
@@ -155,6 +155,21 @@ def test_m1_job_lists():
     assert {j.overrides.get("sigma_hi") for j in tune if j.overrides} == {0.75, 0.5}
     assert tune[5].overrides["eta0"] == 0.05 and tune[5].overrides["sigma_hi"] == 0.75   # the likeliest setting runs first
     assert {j.prompt for j in tune}.isdisjoint({j.prompt for j in ev})
+
+
+def test_only_prompts_keeps_arm_order_for_the_chosen_prompts():
+    jobs = only_prompts(m1_jobs(True), ["a bakery", "a cellar"])
+    assert {j.prompt for j in jobs} == {"a bakery", "a cellar"}
+    assert [j.arm for j in jobs[:6]] == ["unguided"] * 2 + ["darker@eta0.05@hi0.75"] * 2 + ["brighter@eta0.05@hi0.75"] * 2
+
+
+def test_only_prompts_refuses_a_prompt_the_suite_does_not_have():
+    try:
+        only_prompts(m1_jobs(True), ["a bakery", "a bakry"])
+    except ValueError as e:
+        assert "a bakry" in str(e)
+    else:
+        raise AssertionError("a misspelled prompt must not silently run nothing")
 
 
 def test_score_m1_against_known_outcome():
