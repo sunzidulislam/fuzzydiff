@@ -176,6 +176,17 @@ def test_guidance_can_start_after_the_noisiest_steps():
     assert len(guided_sigmas) < CFG.steps
 
 
+def test_step_log_says_whether_the_perturbation_limit_cut_the_step():
+    def logged(dmax):
+        log = MemoryLog()
+        b = tiny_backend()
+        _step(_ctx(b, log=log, targets={0: (0.9, 1.0)}, cfg=GuideCfg(**{**CFG.__dict__, "dmax": dmax})))
+        return next(r for r in log.records if r["type"] == "step")
+    free, cut = logged(1e6), logged(1e-6)
+    assert free["clipped"] is False and free["eta"] > 0
+    assert cut["clipped"] is True and 0 < cut["eta"] < free["eta"]
+
+
 def test_a_met_target_is_not_reported_as_a_small_gradient():
     b = tiny_backend()
     z = b.noise_like_latent(0)

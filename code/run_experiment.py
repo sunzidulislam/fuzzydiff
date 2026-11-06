@@ -439,6 +439,8 @@ def m1_jobs(tune: bool) -> List[Job]:
             for hi in (0.75, 0.5):
                 for arm in COMMANDED:
                     arms.append((f"{arm}@eta{eta0}@hi{hi}", {"eta0": eta0, "sigma_hi": hi}))
+        for arm in COMMANDED:
+            arms.append((f"{arm}@eta0.1@hi0.75@max0.4", {"eta0": 0.1, "sigma_hi": 0.75, "dmax": 0.4}))
         return _neutral_jobs("m1_tune", (0,), arms)
     jobs = _neutral_jobs("m1_eval", (0, 1), [("unguided", {}), ("darker", {}), ("brighter", {})])
     for arm in ("ladder_unguided", "ladder_guided"):
@@ -454,6 +456,16 @@ def only_prompts(jobs: List[Job], prompts) -> List[Job]:
     if missing:
         raise ValueError(f"not in this suite: {sorted(missing)}")
     return [j for j in jobs if j.prompt in prompts]
+
+
+def only_settings(jobs: List[Job], settings) -> List[Job]:
+    """The unguided jobs and those tuned with exactly these settings, such as "eta0.1@hi0.75"."""
+    def setting(job):
+        return job.arm.split("@", 1)[1] if "@" in job.arm else None
+    missing = set(settings) - {setting(j) for j in jobs}
+    if missing:
+        raise ValueError(f"not in this suite: {sorted(missing)}")
+    return [j for j in jobs if j.arm == "unguided" or setting(j) in settings]
 
 
 def arm_jobs(rows, seeds, arms) -> List[Job]:
@@ -532,6 +544,7 @@ def main():
     ap.add_argument("--vae-dtype", default="float16", choices=["float16", "float32"])
     ap.add_argument("--tiny", action="store_true", help="smoke test on the tiny random model (CPU)")
     ap.add_argument("--only-prompt", action="append", help="run only this prompt from the suite; can be repeated")
+    ap.add_argument("--only-setting", action="append", help="run only this tuning setting and unguided; can be repeated")
     ap.add_argument("--limit", type=int, default=None, help="only the first N jobs")
     ap.add_argument("--calibration", default=None, help="fitted calibration file; provisional values if omitted")
     ap.add_argument("--manifest", default=None, help="frozen support manifest; required for --group test")
@@ -573,6 +586,8 @@ def main():
                     measure_factory=lambda prompt, cond: Measure(estimators, prompt, cond))
     if args.only_prompt:
         jobs = only_prompts(jobs, args.only_prompt)
+    if args.only_setting:
+        jobs = only_settings(jobs, args.only_setting)
     result = run_jobs(jobs[:args.limit], deps, args.out, resume_from=args.resume_from)
     n = merge_logs(args.out, Path(args.out) / "all.jsonl")
     print(json.dumps({"done": result.done, "skipped": result.skipped, "failed": result.failed,

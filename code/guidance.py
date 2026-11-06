@@ -171,6 +171,7 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
     attention_fields = _attention_fields(evidence)
     rejections, cos, removed = [], {}, {}
     accepted, n_tried, z_used, v_used, used_evidence = None, 0, z, v_plain, _light_evidence(evidence)
+    first_eta, clipped = None, None
     after: Dict[str, float] = {}
     after_terms: Dict = {}
 
@@ -212,6 +213,8 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
             accepted = False
         else:
             _, eta = bounded_step(z, g, total, cfg)
+            L = float(total)
+            first_eta, clipped = eta, eta < cfg.eta0 * cfg.c_sigma * L / (L + cfg.delta)
             direction = _direction(g, cfg)
             accepted = False
             for _ in range(cfg.backtrack + 1):
@@ -229,7 +232,7 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
                 eta /= 2
 
     _log_step(ctx, step, sigma, b, frozen, accepted, before, after, cos, removed, rejections,
-              before_terms, after_terms, raw_fields, attention_fields)
+              before_terms, after_terms, raw_fields, attention_fields, first_eta, clipped)
     latent_next = plain_next if accepted is not True else _euler(z_used, sigma, sigma_next, v_used)
     return StepOut(z, latent_next.detach(), sigma, sigma_next, v_plain, z_used, accepted, rejections, n_tried,
                    used_evidence)
@@ -275,7 +278,7 @@ def _attention_fields(evidence):
 
 
 def _log_step(ctx, step, sigma, b, frozen, accepted, before, after, cos, removed, rejections, before_terms, after_terms,
-              raw_fields, attention_fields):
+              raw_fields, attention_fields, eta, clipped):
     for f, fields in zip(frozen, raw_fields):
         key = (f.cid, f.component)
         ctx.log.write(type="constraint", prompt=ctx.prompt, seed=ctx.seed, step=step, sigma=float(sigma), bin=b,
@@ -286,7 +289,7 @@ def _log_step(ctx, step, sigma, b, frozen, accepted, before, after, cos, removed
     ctx.log.write(type="step", prompt=ctx.prompt, seed=ctx.seed, step=step, sigma=float(sigma),
                   attention=attention_fields, tiers=sorted({f.tier for f in frozen if f.weight > 0}), loss_before=before,
                   loss_after=after or before, cos=cos, removed=removed, rejections=rejections,
-                  accepted=bool(accepted), eps={str(m): e for m, e in ctx.cfg.eps.items()})
+                  accepted=bool(accepted), eps={str(m): e for m, e in ctx.cfg.eps.items()}, eta=eta, clipped=clipped)
 
 
 def _log_unguided_step(ctx, z, sigma, step):

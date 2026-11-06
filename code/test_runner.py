@@ -22,7 +22,7 @@ from estimators import FakeSigLIP, FakeSupport  # noqa: E402
 from measure import EstimatorDeps, Measure, measure_scene  # noqa: E402
 from predicates import Constraint, Program, translate  # noqa: E402
 from run_experiment import (Deps, Job, arm_jobs, commanded_targets, describe_program, image_id, m1_jobs, merge_logs,  # noqa: E402
-                            only_prompts, placebo_source, prompt_rows, run_jobs, summarize_arms)
+                            only_prompts, only_settings, placebo_source, prompt_rows, run_jobs, summarize_arms)
 from sar import SarCfg  # noqa: E402
 from sd3_backend import tiny_backend  # noqa: E402
 from settings import load_settings  # noqa: E402
@@ -161,6 +161,20 @@ def test_only_prompts_keeps_arm_order_for_the_chosen_prompts():
     jobs = only_prompts(m1_jobs(True), ["a bakery", "a cellar"])
     assert {j.prompt for j in jobs} == {"a bakery", "a cellar"}
     assert [j.arm for j in jobs[:6]] == ["unguided"] * 2 + ["darker@eta0.05@hi0.75"] * 2 + ["brighter@eta0.05@hi0.75"] * 2
+
+
+def test_only_settings_keeps_unguided_and_the_chosen_settings():
+    jobs = only_settings(m1_jobs(True), ["eta0.1@hi0.75", "eta0.1@hi0.75@max0.4"])
+    assert {j.arm for j in jobs} == {"unguided", "darker@eta0.1@hi0.75", "brighter@eta0.1@hi0.75",
+                                     "darker@eta0.1@hi0.75@max0.4", "brighter@eta0.1@hi0.75@max0.4"}
+    wider = next(j for j in jobs if j.arm == "darker@eta0.1@hi0.75@max0.4")
+    assert wider.overrides == {"eta0": 0.1, "sigma_hi": 0.75, "dmax": 0.4}
+    try:
+        only_settings(m1_jobs(True), ["eta9@hi9"])
+    except ValueError as e:
+        assert "eta9@hi9" in str(e)
+    else:
+        raise AssertionError("a misspelled setting must not silently run only the unguided images")
 
 
 def test_only_prompts_refuses_a_prompt_the_suite_does_not_have():
