@@ -146,6 +146,10 @@ groups:
     value: '[per family, from the grid]'
     status: proposed
     note: sigma_lo,r chosen per family on G_sys by the activation rule
+  - name: cfgSigmaHi
+    value: '[value]'
+    status: proposed
+    note: guidance starts here; earlier steps decide what the image shows (Kaggle M1 pilot)
   - name: cfgNact
     value: '3'
     status: proposed

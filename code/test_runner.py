@@ -21,7 +21,7 @@ from guidance import GuideCfg, run_stage1  # noqa: E402
 from estimators import FakeSigLIP, FakeSupport  # noqa: E402
 from measure import EstimatorDeps, Measure, measure_scene  # noqa: E402
 from predicates import Constraint, Program, translate  # noqa: E402
-from run_experiment import (Deps, Job, arm_jobs, commanded_targets, describe_program, image_id, m1_jobs, merge_logs,  # noqa: E402
+from run_experiment import (Deps, Job, arm_jobs, commanded_targets, describe_program, guide_cfg, image_id, m1_jobs, merge_logs,  # noqa: E402
                             only_prompts, only_settings, placebo_source, prompt_rows, run_jobs, summarize_arms)
 from sar import SarCfg  # noqa: E402
 from sd3_backend import tiny_backend  # noqa: E402
@@ -175,6 +175,11 @@ def test_only_settings_keeps_unguided_and_the_chosen_settings():
         assert "eta9@hi9" in str(e)
     else:
         raise AssertionError("a misspelled setting must not silently run only the unguided images")
+
+
+def test_guidance_start_comes_from_the_settings():
+    s = load_settings()
+    assert guide_cfg(s).sigma_hi == 0.75 and "cfgSigmaHi" in s.provisional_used
 
 
 def test_only_prompts_refuses_a_prompt_the_suite_does_not_have():

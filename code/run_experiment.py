@@ -503,7 +503,7 @@ def describe_program(prompt: str) -> str:
 
 
 def guide_cfg(s) -> GuideCfg:
-    return GuideCfg(steps=s.get("cfgSteps", int), cfg=s.get("cfgCFG"), sigma_lo=s.get("cfgSigmaLo"),
+    return GuideCfg(steps=s.get("cfgSteps", int), cfg=s.get("cfgCFG"), sigma_lo=s.get("cfgSigmaLo"), sigma_hi=s.get("cfgSigmaHi"),
                     eta0=s.get("cfgEtaZero"), delta=s.get("cfgDelta"), dmax=s.get("cfgMaxPert"),
                     eps={1: s.get("cfgEpsOne"), 2: s.get("cfgEpsTwo")}, backtrack=s.get("cfgBacktrack", int),
                     ramp=s.get("cfgRampSteps", int), g_min=s.get("g_min"), eps_g=s.get("eps_g"),

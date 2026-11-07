@@ -6,6 +6,7 @@ cfgMaxPert: 0.2
 cfgLambda: 1.0
 cfgEpsAcc: 0.01
 cfgSigmaLo: 0.25
+cfgSigmaHi: 0.75
 cfgEpsOne: 0.01
 cfgEpsTwo: 0.01
 cfgStrength: 0.4
