@@ -204,6 +204,21 @@ def test_a_step_limit_changes_a_guided_run_and_is_recorded():
     assert run(0.4)["overrides"]["dmax"] == 0.4 and run(None)["overrides"] == {}
 
 
+def test_step_count_from_the_command_line_changes_the_guided_run():
+    def guided_steps(steps):
+        found = []
+
+        def body(tmp):
+            r = prompt_rows(["a red mug and a blue teapot"])
+            summary = run_jobs(with_overrides(arm_jobs(r, (0,), ["stage1"]), steps=steps), four_arm_deps(), tmp)
+            assert summary.failed == 0, summary.failures
+            log = tmp / "stage1" / image_id(r[0].prompt, 0) / "log.jsonl"
+            found.extend(rec for rec in map(json.loads, log.read_text().splitlines()) if rec["type"] == "step")
+        with_tmp(body)
+        return len(found)
+    assert guided_steps(4) == 4 and guided_steps(8) == 8
+
+
 def test_only_prompts_refuses_a_prompt_the_suite_does_not_have():
     try:
         only_prompts(m1_jobs(True), ["a bakery", "a bakry"])

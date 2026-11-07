@@ -552,6 +552,7 @@ def main():
     ap.add_argument("--only-prompt", action="append", help="run only this prompt from the suite; can be repeated")
     ap.add_argument("--only-setting", action="append", help="run only this tuning setting and unguided; can be repeated")
     ap.add_argument("--dmax", type=float, default=None, help="largest change to one latent value per step, for trying other limits")
+    ap.add_argument("--steps", type=int, default=None, help="sampling steps of Stage 1 and unguided images, for comparing step counts")
     ap.add_argument("--limit", type=int, default=None, help="only the first N jobs")
     ap.add_argument("--calibration", default=None, help="fitted calibration file; provisional values if omitted")
     ap.add_argument("--manifest", default=None, help="frozen support manifest; required for --group test")
@@ -595,7 +596,8 @@ def main():
         jobs = only_prompts(jobs, args.only_prompt)
     if args.only_setting:
         jobs = only_settings(jobs, args.only_setting)
-    result = run_jobs(with_overrides(jobs, dmax=args.dmax)[:args.limit], deps, args.out, resume_from=args.resume_from)
+    jobs = with_overrides(jobs, dmax=args.dmax, steps=args.steps)
+    result = run_jobs(jobs[:args.limit], deps, args.out, resume_from=args.resume_from)
     n = merge_logs(args.out, Path(args.out) / "all.jsonl")
     print(json.dumps({"done": result.done, "skipped": result.skipped, "failed": result.failed,
                       "failures": result.failures[:20], "log_records": n, "arms": summarize_arms(args.out)}, indent=1))

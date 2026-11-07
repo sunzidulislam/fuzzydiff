@@ -6,7 +6,7 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from calibration import ProvisionalCalibration  # noqa: E402
-from color_stats import oklab_to_srgb, srgb_to_oklab  # noqa: E402
+from color_stats import mixture_stats, oklab_to_srgb, srgb_to_oklab  # noqa: E402
 from constraints import Evidence, freeze_step, in_domain, membership, new_state, score, tier_losses  # noqa: E402
 from estimators import FakeSigLIP, FakeSupport  # noqa: E402
 from grounding import phrase_spans  # noqa: E402
@@ -154,6 +154,48 @@ def test_an_objects_core_leaves_out_the_other_object():
     teapot_core = ev.objects["teapot"]["core"]
     on_mug = teapot_core[half_masks()["mug"] > 0]
     assert float(on_mug.max()) < 0.01 * float(teapot_core.max())    # leakage reads this core, not the colour being tested
+
+
+def _uniform_lab(L, a, b):
+    return torch.stack([torch.full((16, 16), v, dtype=DT) for v in (L, a, b)])
+
+
+def _red_axis():
+    red = PROV.prototype("red")
+    return torch.stack([red[0], torch.zeros_like(red[0]), torch.zeros_like(red[0])]), red
+
+
+def test_mixture_position_ignores_shading():
+    c1, red = _red_axis()
+    core = torch.ones(16, 16, dtype=DT)
+    for shade in (1.0, 0.75, 0.5):                  # the same surface in less light, as on the Kaggle mug
+        lab = _uniform_lab(float(red[0]) * shade, float(red[1]) * shade, float(red[2]) * shade)
+        assert abs(float(mixture_stats(lab, core, c1, red, sigma_p=0.5)["rho"]) - 1.0) < 1e-6
+
+
+def test_mixture_position_still_measures_how_much_colour_there_is():
+    c1, red = _red_axis()
+    core = torch.ones(16, 16, dtype=DT)
+    for fraction in (0.0, 0.15, 0.5):
+        lab = _uniform_lab(float(red[0]), float(red[1]) * fraction, float(red[2]) * fraction)
+        assert abs(float(mixture_stats(lab, core, c1, red, sigma_p=0.5)["rho"]) - fraction) < 1e-6
+
+
+def test_lowering_the_mixture_score_means_more_light_or_less_colour_and_never_darkening():
+    c1, red = _red_axis()
+    lab = _uniform_lab(float(red[0]), float(red[1]), float(red[2])).requires_grad_()
+    rho = mixture_stats(lab, torch.ones(16, 16, dtype=DT), c1, red, sigma_p=0.5)["rho"]
+    rho.backward()
+    assert float(lab.grad[0].sum()) < 0             # brighter lowers rho, so descent does not darken
+    assert float(lab.grad[1].sum()) > 0             # less chroma lowers rho
+
+
+def test_mixture_stays_finite_and_bounded_on_near_black_pixels():
+    c1, red = _red_axis()
+    lab = _uniform_lab(1e-4, 1e-3, 1e-3).requires_grad_()
+    stats = mixture_stats(lab, torch.ones(16, 16, dtype=DT), c1, red, sigma_p=0.5)
+    stats["rho"].backward()
+    assert abs(float(stats["rho"])) < 0.1 and torch.isfinite(lab.grad).all()
 
 
 def test_a_darkened_mug_does_not_pass_as_a_faint_colour():

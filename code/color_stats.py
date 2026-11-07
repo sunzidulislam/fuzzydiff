@@ -85,10 +85,18 @@ def trimmed_mean(lab, w, trim=0.1, temp=0.02):
     return (lab.reshape(3, -1) * wt).sum(1) / (wt.sum() + 1e-8)
 
 
+SATURATION_L_FLOOR = 0.2                    # near-black pixels have no meaningful saturation
+
+
+def _saturation(ab, L, floor=SATURATION_L_FLOOR):
+    """(a, b) / L: unchanged when a surface is lit less, unlike raw chroma, which falls with lightness."""
+    return ab / L.clamp_min(floor)
+
+
 def _axis(c1, c2, chroma_min=0.5):
     """Mixture axis: the chromatic (a, b) plane when the two colors differ mainly in hue or chroma
-    (|v_ab| >= chroma_min |v|), which makes the axis insensitive to shading; full OKLab otherwise
-    (lightness mixtures such as gray-white)."""
+    (|v_ab| >= chroma_min |v|), where positions are measured on saturation so shading cannot move
+    them; full OKLab otherwise (lightness mixtures such as gray-white)."""
     v = c2 - c1
     dims = slice(1, 3) if torch.linalg.norm(v[1:]) >= chroma_min * torch.linalg.norm(v) else slice(0, 3)
     return dims
@@ -111,6 +119,10 @@ def mixture_stats(lab, w, c1, c2, sigma_p=2.0, trim=0.1, eps=1e-6):
     """All F6 statistics from ONE representation: the OKLab image blurred at the integration scale
     sigma_p, C~ = B_sigma_p * C, and ONE weighting distribution omega (core x trim).
 
+      On a chromatic axis every color below is first replaced by its saturation (a, b) / L; raw
+      chroma falls with lightness, so guidance could lower rho by darkening (Kaggle: a red mug went
+      from RGB 200,6,31 to 138,7,23 with the same saturation).
+
       s_i   = <C~_i - C1, v> / |v|^2            unclipped axial position
       t_i   = clip(s_i, 0, 1)                    clipped position (pattern index)
       r_i   = (C~_i - C1) - s_i v                orthogonal residual of pixel i
@@ -126,9 +138,15 @@ def mixture_stats(lab, w, c1, c2, sigma_p=2.0, trim=0.1, eps=1e-6):
     lb = _blur(lab, sigma_p)
     omega = _weights(lb, w, trim)
     d = _axis(c1, c2)
-    v = (c2 - c1)[d]
+    pixels = lb.reshape(3, -1)
+    if d == slice(1, 3):
+        start = _saturation(c1[1:], c1[0])
+        v = _saturation(c2[1:], c2[0]) - start
+        X = _saturation(pixels[1:], pixels[0]) - start.view(-1, 1)
+    else:
+        v = (c2 - c1)[d]
+        X = pixels[d] - c1[d].view(-1, 1)                        # [k, N]
     vv = v @ v
-    X = lb.reshape(3, -1)[d] - c1[d].view(-1, 1)                 # [k, N]
     s_ = (X * v.view(-1, 1)).sum(0) / vv                         # axial positions
     R = X - s_.unsqueeze(0) * v.view(-1, 1)                      # orthogonal residuals
     cbar = (lb.reshape(3, -1) * omega).sum(1)
