@@ -95,10 +95,15 @@ class ProvisionalCalibration:
         return self.s.get("leakage_tau")
 
     def attention_thresholds(self, kind):
-        return (self.s.get("cfgPeak"), self.s.get("cfgMassMin"), self.s.get("cfgTauMin"))
+        m_min = self.s.get("attention_m_min", default=self.s.get("cfgMassMin"))
+        return (self.s.get("cfgPeak"), m_min, self.s.get("cfgTauMin"))
 
     def presence_logit(self, bin, global_logit, region_logit):
-        return (global_logit + region_logit) / 2
+        models = self.s.get("presence_models", dict, default=None)
+        if not models:
+            return (global_logit + region_logit) / 2
+        m = models[min(models, key=lambda b: abs(int(b) - int(bin)))]
+        return m["w_global"] * global_logit + m["w_region"] * region_logit + m["bias"]
 
     def size_quantiles(self, features):
         return (self.s.get("size_c68"), self.s.get("size_c95"))
