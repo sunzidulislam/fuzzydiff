@@ -13,7 +13,8 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from annotate import (FMAS_ARMS, build_comparison_page, build_fmas_page, build_missing_page, build_rating_page,  # noqa: E402
                       build_mixture_page, build_success_page, export_mask_tasks, export_rating_tasks, import_masks,
-                      import_ratings, score_fmas, score_m1, score_missing, score_mixture, score_success)
+                      import_ratings, score_fmas, score_m1, score_missing, score_mixture, score_success,
+                      ABLATION_ARM_NAMES, ABLATION_COMPARISONS, ablation_table_rows, build_size_page)
 from calibration_fit import FittedCalibration  # noqa: E402
 from fit_calibration import fit_main, rows_from_run  # noqa: E402
 from reporting import read_jsonl, tier_rows  # noqa: E402
@@ -510,6 +511,65 @@ def test_mixture_counts_an_untouched_fidelity_slider_as_unrated():
                          lambda prompt, arm: (False, None if arm == "stage1" else 70))
         r = score_mixture(tmp / "ratings.json", tmp / "mixture.key.json")
         assert r["unrated"] == 2 and "stage1" not in r["fidelity"] and r["missing"]["strict"]["stage1"] == 0.0
+    with_tmp(body)
+
+
+SIZE_PROMPTS = ["a suitcase slightly larger than a mug", "a toaster considerably smaller than a blanket",
+                "a bowl considerably larger than a mug"]
+
+
+def _size_ratings(tmp, chosen, per_image, tag="size"):
+    key = json.loads((tmp / f"{tag}.key.json").read_text())
+    out = []
+    for group, entry in key.items():
+        for panel, arm in entry["panels"].items():
+            for obj in entry["objects"]:
+                out.append({"group": group, "panel": panel, "object": obj, "present": chosen(arm, obj), "colour": None})
+            size, fidelity = per_image(entry["prompt"], arm)
+            out.append({"group": group, "panel": panel, "size": size, "fidelity": fidelity})
+    (tmp / "ratings.json").write_text(json.dumps(out))
+
+
+def test_size_page_asks_the_relation_in_the_prompts_words_and_never_about_colour():
+    def body(tmp):
+        _fmas_run(tmp, SIZE_PROMPTS[:2])
+        build_size_page(tmp, tmp / "size.html", seed=4)
+        page = (tmp / "size.html").read_text(encoding="utf-8")
+        assert not any(arm in page for arm in FMAS_ARMS)
+        assert "Is the suitcase slightly larger than the mug?" in page and "Is there a blanket?" in page
+        assert 'data-q="colour" name=' not in page and 'answer(p,"size")' in page and "leakage" not in page
+        assert page.count('data-q="size"') == 2 * 2 * len(FMAS_ARMS)
+    with_tmp(body)
+
+
+def test_size_scoring_counts_a_no_as_a_violation():
+    def body(tmp):
+        _fmas_run(tmp, SIZE_PROMPTS)
+        build_size_page(tmp, tmp / "size.html", seed=4)
+        _size_ratings(tmp, lambda arm, obj: not (arm == "unguided" and obj == "mug"),
+                      lambda prompt, arm: (arm != "unguided", 30 if arm == "unguided" else 70))
+        r = score_mixture(tmp / "ratings.json", tmp / "size.key.json", field="size")
+        assert r["size_violation"] == {"unguided": 100.0, "stage1": 0.0, "stage1_plain": 0.0, "stage1_sar": 0.0}
+        assert r["missing"]["strict"]["unguided"] == 200 / 3 and r["missing"]["strict"]["stage1"] == 0.0
+        assert r["comparisons"]["size_violation"]["stage1 - unguided"]["better"] == 3
+        assert "leakage" not in r and r["unrated"] == 0
+    with_tmp(body)
+
+
+def test_ablation_scores_compare_each_ablation_with_stage1_and_fill_the_table():
+    def body(tmp):
+        _fmas_run(tmp, MIX_PROMPTS, arms=ABLATION_ARM_NAMES)
+        build_mixture_page(tmp, tmp / "mixture.html", seed=3, arms=ABLATION_ARM_NAMES)
+        _mixture_ratings(tmp, lambda prompt, arm, obj: (True, arm != "abl_floored"),
+                         lambda prompt, arm: (arm == "unguided", 40 if arm == "abl_point" else 60))
+        r = score_mixture(tmp / "ratings.json", tmp / "mixture.key.json", comparisons=ABLATION_COMPARISONS)
+        assert r["missing"]["strict"]["abl_floored"] == 100.0 and r["leakage"]["unguided"] == 100.0
+        assert r["comparisons"]["missing_strict"]["abl_floored - stage1"]["worse"] == 4
+        assert r["comparisons"]["fidelity"]["abl_point - stage1"]["difference"] == -20.0
+        rows = ablation_table_rows(mixture=r).splitlines()
+        floored = next(x for x in rows if "floored" in x)
+        assert floored.startswith(r"\quad floored") and r"& 100.0 & 0.0 & 60.0 & \tbd" in floored
+        assert sum("multicolumn" in x for x in rows) == 2 and rows.count(r"\midrule") == 1
     with_tmp(body)
 
 

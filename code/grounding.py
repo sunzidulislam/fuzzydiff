@@ -117,14 +117,16 @@ def aggregate_maps(out, cond, read_blocks: Sequence[int], thresholds, weights=No
     return result
 
 
+def overlap(p_a, p_q, eps: float = 1e-6):
+    """b(a, q): the mean of a's map over q's map (Eq. attention_stats)."""
+    return (p_a * p_q).sum() / (p_q.sum() + eps)
+
+
 def binding(p_a, p_q, others: List[torch.Tensor], tau: float, eps: float = 1e-6):
     """beta(a, q) = b(a, q) - smax_r b(a, r), with the log-mean-exp soft maximum (Eq. attention_stats)."""
-    def overlap(p_r):
-        return (p_a * p_r).sum() / (p_r.sum() + eps)
-
-    competitors = torch.stack([overlap(r) for r in others])
+    competitors = torch.stack([overlap(p_a, r, eps) for r in others])
     smax = tau * (torch.logsumexp(competitors / tau, dim=0) - math.log(len(others)))
-    return overlap(p_q) - smax
+    return overlap(p_a, p_q, eps) - smax
 
 
 def missing_phrases(prompt: str, program) -> List[str]:

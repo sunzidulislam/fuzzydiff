@@ -12,8 +12,10 @@ import hashlib
 import html
 import io
 import json
+import re
 import os
 import random
+import string
 import sys
 from pathlib import Path
 from collections import defaultdict
@@ -144,6 +146,8 @@ document.getElementById("export").onclick=function(){
 
 def _blind_groups(out_dir, out: Path, seed: int, arms, tag, panel_controls, extra=None):
     """One section per prompt, arms in shuffled panels, the prompt shown and the arm hidden. Writes the key."""
+    if len(arms) > len(string.ascii_uppercase):
+        raise ValueError(f"{len(arms)} arms, but panels are lettered A to Z")
     out_dir = Path(out_dir)
     rng = random.Random(seed)
     per_image = {}
@@ -162,7 +166,7 @@ def _blind_groups(out_dir, out: Path, seed: int, arms, tag, panel_controls, extr
         rng.shuffle(order)
         key[group] = {"prompt": prompt, "panels": {}, **(extra(prompt) if extra else {})}
         panels = []
-        for letter, arm in zip("ABCDEFGH", order):
+        for letter, arm in zip(string.ascii_uppercase, order):
             key[group]["panels"][letter] = arm
             panels.append(f'<figure data-panel="{letter}" data-group="{group}"><figcaption>{letter}</figcaption>'
                           f'<img alt="panel {letter}" src="data:image/jpeg;base64,{_encode(found[arm])}">'
@@ -328,7 +332,7 @@ def score_missing(ratings: Path, key: Path) -> dict:
     return _score_missing_rows([r for r in rated if "object" in r], groups)
 
 
-def _score_missing_rows(rated, groups) -> dict:
+def _score_missing_rows(rated, groups, comparisons=FMAS_COMPARISONS) -> dict:
     answers = defaultdict(dict)
     for r in rated:
         answers[(r["group"], r["panel"])][r["object"]] = r
@@ -357,7 +361,7 @@ def _score_missing_rows(rated, groups) -> dict:
                 per_arm[arm].append(value)
         out[kind] = {arm: sum(v) / len(v) for arm, v in per_arm.items()}
         out["comparisons"][kind] = {f"{a} - {b}": _paired_comparison(table, a, b, lower_is_better=True)
-                                    for a, b in FMAS_COMPARISONS}
+                                    for a, b in comparisons}
     return out
 
 
@@ -411,23 +415,26 @@ def score_success(ratings: Path, key: Path) -> dict:
             "note": "pilot only: author ratings and provisional calibration"}
 
 
-def score_mixture(ratings: Path, key: Path) -> dict:
-    """Exp. ii: missing objects (lenient, strict), leakage in percent of images, and mean Fidelity (0 to 100)."""
+def score_mixture(ratings: Path, key: Path, field: str = "leakage", comparisons=FMAS_COMPARISONS) -> dict:
+    """Exp. ii: missing objects (lenient, strict), leakage in percent of images, and mean Fidelity (0 to 100).
+    With field="size" it scores Exp. iii instead: size violations in place of leakage."""
     with open(ratings) as f:
         rated = json.load(f)
     with open(key) as f:
         groups = json.load(f)
-    missing = _score_missing_rows([r for r in rated if "object" in r], groups)
+    missing = _score_missing_rows([r for r in rated if "object" in r], groups, comparisons)
     leakage, fidelity, unrated = {}, {}, missing["unrated"]
     for r in (r for r in rated if "object" not in r):
         entry = groups[r["group"]]
         arm = entry["panels"][r["panel"]]
-        if r["leakage"] is None or r["fidelity"] is None:
+        if r[field] is None or r["fidelity"] is None:
             unrated += 1
             continue
         if not 0 <= r["fidelity"] <= 100:
             raise ValueError(f"fidelity {r['fidelity']} is outside 0 to 100")
-        leakage.setdefault(entry["prompt"], {})[arm] = 100.0 if r["leakage"] else 0.0
+        # leakage: "yes" is the failure; size: "no" (the relation does not match) is the failure
+        failed = r[field] if field == "leakage" else not r[field]
+        leakage.setdefault(entry["prompt"], {})[arm] = 100.0 if failed else 0.0
         fidelity.setdefault(entry["prompt"], {})[arm] = float(r["fidelity"])
 
     def per_arm(table):
@@ -436,13 +443,95 @@ def score_mixture(ratings: Path, key: Path) -> dict:
             for arm, v in scores.items():
                 values[arm].append(v)
         return {arm: sum(v) / len(v) for arm, v in values.items()}
-    comparisons = {"missing_lenient": missing["comparisons"]["lenient"], "missing_strict": missing["comparisons"]["strict"],
-                   "leakage": {f"{a} - {b}": _paired_comparison(leakage, a, b, lower_is_better=True) for a, b in FMAS_COMPARISONS},
-                   "fidelity": {f"{a} - {b}": _paired_comparison(fidelity, a, b) for a, b in FMAS_COMPARISONS}}
-    return {"missing": {"lenient": missing["lenient"], "strict": missing["strict"]}, "leakage": per_arm(leakage),
+    name = "leakage" if field == "leakage" else "size_violation"
+    paired = {"missing_lenient": missing["comparisons"]["lenient"], "missing_strict": missing["comparisons"]["strict"],
+              name: {f"{a} - {b}": _paired_comparison(leakage, a, b, lower_is_better=True) for a, b in comparisons},
+              "fidelity": {f"{a} - {b}": _paired_comparison(fidelity, a, b) for a, b in comparisons}}
+    return {"missing": {"lenient": missing["lenient"], "strict": missing["strict"]}, name: per_arm(leakage),
             "fidelity": per_arm(fidelity), "n_prompts": len({e["prompt"] for e in groups.values()}), "unrated": unrated,
-            "comparisons": comparisons,
-            "note": "missing and leakage: lower is better; fidelity: higher is better; pilot only: author ratings and provisional calibration"}
+            "comparisons": paired,
+            "note": f"missing and {name.replace('_', ' ')}: lower is better; fidelity: higher is better; "
+                    "pilot only: author ratings and provisional calibration"}
+
+
+# Tab. ablation. Keep in step with run_experiment.ABLATION_TABLE_ARMS (test_ablation checks it).
+ABLATION_ROWS = (("unguided", "SD3, no guidance"), ("stage1", "Stage~1 (full)"),
+                 ("abl_point", "\\quad point target at interval center"),
+                 ("abl_one_sided", "\\quad one-sided (``more is better'')"),
+                 ("abl_attention_only", "\\quad attention-only evidence"),
+                 ("abl_overlap", "\\quad overlap $b$ instead of contrastive $\\beta$"),
+                 (None, "\\quad w/o gradient-validity gate"),
+                 ("abl_cond_x0", "\\quad conditional $\\hat x_0$ (not CFG)"),
+                 (None, "\\quad w/o noise-bin validity gates"),
+                 ("abl_floored", "\\quad floored log loss (saturating)"),
+                 ("abl_weighted_sum", "\\quad weighted sum (no priority)"),
+                 ("abl_no_acceptance", "\\quad w/o acceptance test"),
+                 ("stage1_plain", "S1 + plain SD3 img2img"), ("stage1_sar", "S1 + SAR (logit bias, ours)"),
+                 ("stage1_placebo", "S1 + SAR, placebo priors"), ("stage1_sar_nocheck", "S1 + SAR w/o consistency check"))
+ABLATION_ARM_NAMES = tuple(a for a, _ in ABLATION_ROWS if a)
+ABLATION_COMPARISONS = (("stage1", "unguided"),
+                        *((a, "stage1") for a in ABLATION_ARM_NAMES if a.startswith("abl_")),
+                        ("stage1_plain", "stage1"), ("stage1_sar", "stage1"), ("stage1_sar", "stage1_plain"),
+                        ("stage1_placebo", "stage1_sar"), ("stage1_sar_nocheck", "stage1_sar"))
+
+
+def _size_question(prompt):
+    """The size relation in the prompt's own words, e.g. 'Is the suitcase slightly larger than the mug?'"""
+    program = translate(prompt)
+    relation = next((c for c in program.constraints if c.family == "F8"), None)
+    if relation is None:
+        return "Does the size relation match the prompt?"
+    q, r = relation.args
+    match = re.search(rf"\b{re.escape(q)}\b(.*?)\bthan\b\s+(?:a|an|the)?\s*{re.escape(r)}\b", prompt)
+    words = match.group(1).strip() if match else None
+    if not words:
+        return "Does the size relation match the prompt?"
+    return f"Is the {q} {words} than the {r}?"
+
+
+SIZE_PAGE = MIXTURE_PAGE.replace("<title>Colour mixture rating</title>", "<title>Size relation rating</title>").replace(
+    "<h1>Colour mixture rating</h1>", "<h1>Size relation rating</h1>").replace(
+    MIXTURE_PAGE[MIXTURE_PAGE.index("For each object in each"):MIXTURE_PAGE.index("Answer from what you see")],
+    "For each object in each\nimage, say whether it is there. Then say whether the size relation matches the prompt, "
+    "including how much\nlarger or smaller it should be, and move the Fidelity slider to say how well the whole image "
+    "fits the prompt (0 to 100). ").replace(
+    'answer(p,"leakage")', 'answer(p,"size")').replace("leakage:leak", "size:leak")
+
+
+def build_size_page(out_dir, out: Path, seed: int, arms=FMAS_ARMS) -> None:
+    """Exp. iii in one pass: missing objects (per object), size relation and Fidelity (per image)."""
+    def controls(group, letter, prompt):
+        size = (f'<p class="q">{html.escape(_size_question(prompt))} '
+                f'<label><input type="radio" data-q="size" name="{group}-{letter}-size" value="yes">Yes</label>'
+                f'<label><input type="radio" data-q="size" name="{group}-{letter}-size" value="no">No</label></p>')
+        fidelity = ('<p class="q">Fidelity: how well does the whole image fit the prompt? '
+                    '<input type="range" min="0" max="100" value="50"> <b>not set</b></p>')
+        return _object_questions(group, letter, prompt) + size + fidelity
+    Path(out).write_text(SIZE_PAGE % {"groups": _blind_groups(out_dir, out, seed, arms, "size", controls, _key_objects)},
+                         encoding="utf-8")
+
+
+def _cell(value, digits=1):
+    return "\\tbd" if value is None else f"{value:.{digits}f}"
+
+
+def ablation_table_rows(mixture=None, size=None) -> str:
+    """LaTeX rows of Tab. ablation from score_mixture (Exp. ii) and score_mixture(field="size") (Exp. iii).
+    Missing objects are the strict rate; a missing experiment stays TBD."""
+    lines = []
+    for arm, label in ABLATION_ROWS:
+        if arm == "stage1_plain":
+            lines.append("\\midrule")
+        if arm is None:
+            lines.append(f"{label} & \\multicolumn{{6}}{{c}}{{= Stage~1 (no such gate in provisional calibration)}}\\\\")
+            continue
+        cells = []
+        for scores, name in ((mixture, "leakage"), (size, "size_violation")):
+            scores = scores or {}
+            cells += [_cell(scores.get("missing", {}).get("strict", {}).get(arm)), _cell(scores.get(name, {}).get(arm)),
+                      _cell(scores.get("fidelity", {}).get(arm))]
+        lines.append(f"{label} & " + " & ".join(cells) + "\\\\")
+    return "\n".join(lines)
 
 
 def score_m1(ratings: Path, key: Path, out_dir: Path, settings) -> dict:

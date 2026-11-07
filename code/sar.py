@@ -39,6 +39,7 @@ class SarCfg:
     nest: float
     confidence: bool = False
     competition: bool = False
+    consistency: bool = True                # False: the ablation keeps every prior for all K steps (final check stays)
 
 
 @dataclass
@@ -264,6 +265,8 @@ def run_stage2(backend, stage1, cond, program, prompt, calib, seg, cfg: SarCfg, 
             if not calib.stage2_valid(b):
                 suspended = True
                 out.suspended_steps += 1
+            elif enabled and not cfg.consistency:
+                q_k = set(enabled)
             elif enabled:
                 x_hat = backend.decode(backend.clean(z, sigma, first.v))
                 bad = failing(x_hat, enabled)

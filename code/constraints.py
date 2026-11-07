@@ -19,6 +19,8 @@ from calibration import domain_weight, ramp_weight  # noqa: E402
 from predicates import Constraint  # noqa: E402
 
 EPS_C = 1e-6
+LOG_FLOOR = 1e-3                            # epsilon of the floored log loss (App. "Why the floored log loss fails")
+DEGREE_FAMILIES = ("F2a", "F6", "F8")
 
 
 @dataclass
@@ -44,6 +46,7 @@ class Frozen:
     kappa: float
     gates: Dict[str, bool] = field(hash=False, default_factory=dict)
     component: str = "main"
+    loss: str = "charbonnier"               # "floored": the ablation -log(eps + (1 - eps) mu)
 
 
 @dataclass
@@ -60,6 +63,8 @@ class StepState:
     unguided: set = field(default_factory=set)
     size_regime: Dict[int, str] = field(default_factory=dict)
     size_bounds: Dict[int, tuple] = field(default_factory=dict)
+    target: str = "interval"                # ablations: "point" (interval center) or "one_sided" (mu >= l)
+    loss: str = "charbonnier"
 
 
 def new_state(**kw) -> StepState:
@@ -82,6 +87,24 @@ def violation(s, low, high):
 
 def charbonnier(d, kappa):
     return torch.sqrt(1 + (d / kappa) ** 2) - 1
+
+
+def floored_log_loss(d, kappa, eps=LOG_FLOOR):
+    mu = torch.exp(-d ** 2 / (2 * kappa ** 2))
+    return -torch.log(eps + (1 - eps) * mu)
+
+
+def constraint_loss(f, d):
+    return floored_log_loss(d, f.kappa) if f.loss == "floored" else charbonnier(d, f.kappa)
+
+
+def ablated_target(c, component, low, high, target):
+    """Interval ablations change only the degree target: a point at the center, or the half-line above l."""
+    if target == "interval" or c.family not in DEGREE_FAMILIES or component != "main" or math.isinf(low):
+        return low, high
+    if target == "one_sided":
+        return low, math.inf
+    return (low, low) if math.isinf(high) else ((low + high) / 2, (low + high) / 2)
 
 
 class Scorer:
@@ -322,6 +345,7 @@ def freeze_step(program, evidence, calib, bin, state: StepState, targets=None) -
             lo, hi = sc.domain(c, calib, bin, component)
             gates["domain"] = _inside(raw, lo, hi)
             low, high, kappa = sc.resolve(cid, c, evidence, calib, state, *sc.interval(c, calib, component), gates)
+            low, high = ablated_target(c, component, low, high, state.target)
             if targets and cid in targets:
                 low, high = targets[cid]
             weight = 0.0
@@ -330,7 +354,7 @@ def freeze_step(program, evidence, calib, bin, state: StepState, targets=None) -
                 since = state.first_valid[c.family]
                 ramp = 1.0 if since == state.first_step else ramp_weight(state.step - since, state.ramp)
                 weight = state.lam * dom * ramp * _support_weight(c, evidence)
-            out.append(Frozen(c, cid, c.tier, bin, float(weight), low, high, kappa, gates, component))
+            out.append(Frozen(c, cid, c.tier, bin, float(weight), low, high, kappa, gates, component, state.loss))
     return out
 
 
@@ -356,7 +380,7 @@ def tier_losses(frozen: List[Frozen], evidence, calib) -> Dict[int, torch.Tensor
     device = None                           # attention and estimators may live on different GPUs
     for f in frozen:
         if f.weight > 0:
-            term = f.weight * charbonnier(violation(score(f, evidence, calib), f.low, f.high), f.kappa)
+            term = f.weight * constraint_loss(f, violation(score(f, evidence, calib), f.low, f.high))
             device = term.device if device is None else device
             term = term.to(device)
             losses[f.tier] = losses[f.tier] + term if f.tier in losses else term

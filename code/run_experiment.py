@@ -52,8 +52,23 @@ from settings import load_settings  # noqa: E402
 COMMANDED = {"darker": -1, "brighter": +1}
 TARGET_BAND = 0.02
 UNGUIDED_ARMS = {"unguided", "ladder_unguided"}
-STAGE2_MODES = {"stage1_plain": "plain", "stage1_sar": "sar", "stage1_placebo": "sar"}
+STAGE2_MODES = {"stage1_plain": "plain", "stage1_sar": "sar", "stage1_placebo": "sar", "stage1_sar_nocheck": "sar"}
 COMPARISON_ARMS = ("stage1", "stage1_plain", "stage1_sar", "stage1_placebo")
+# Tab. ablation: each Stage-1 arm changes one component. Values are GuideCfg fields, StepState fields
+# (state_kw), or the Measure ablation. "w/o gradient-validity gate" and "w/o noise-bin validity gates" have
+# no arm: provisional calibration has neither gate (every family is valid in every bin), so both equal Stage 1.
+ABLATION_ARMS = {
+    "abl_point": {"state": {"target": "point"}},
+    "abl_one_sided": {"state": {"target": "one_sided"}},
+    "abl_attention_only": {"measure": "attention_only"},
+    "abl_overlap": {"measure": "overlap"},
+    "abl_cond_x0": {"cfg": {"cond_x0": True}},
+    "abl_floored": {"state": {"loss": "floored"}},
+    "abl_weighted_sum": {"cfg": {"priority": False}},
+    "abl_no_acceptance": {"cfg": {"acceptance": False}},
+}
+ABLATION_TABLE_ARMS = ("unguided", "stage1", *ABLATION_ARMS, "stage1_plain", "stage1_sar", "stage1_placebo",
+                       "stage1_sar_nocheck")
 
 
 class JobFailure(RuntimeError):
@@ -238,9 +253,10 @@ def _run_stage2_arm(job, deps, out, tmp, meta, cond, measure, log):
     mode = STAGE2_MODES[job.arm]
     stage1 = _load_stage1(out, job.prompt, job.seed, deps.backend)
     priors = None
+    sar = dataclasses.replace(deps.sar_cfg, consistency=False) if job.arm == "stage1_sar_nocheck" else deps.sar_cfg
     if job.arm == "stage1_placebo":
         priors, meta["placebo_from"] = _placebo_priors(job, deps, out, cond)
-    result = run_stage2(deps.backend, stage1, cond, job.program, job.prompt, deps.calib, deps.seg, deps.sar_cfg, job.seed, log,
+    result = run_stage2(deps.backend, stage1, cond, job.program, job.prompt, deps.calib, deps.seg, sar, job.seed, log,
                         mode=mode, measure=measure, steps=deps.cfg.steps, priors=priors)
     with torch.no_grad():
         finals, _ = score_image(job.program, measure, deps.backend, deps.calib, result.image,
@@ -280,9 +296,17 @@ def _execute(job: Job, deps: Deps, out: Path, tmp: Path) -> dict:
         base = _read_meta(out, "ladder_unguided" if job.arm == "ladder_guided" else job.base_arm, job)
         base_finals = base["finals"] if base else None
 
+    ablation = ABLATION_ARMS.get(job.arm, {})
+    if ablation:
+        cfg = dataclasses.replace(cfg, **ablation.get("cfg", {}),
+                                  state_kw={**cfg.state_kw, **ablation.get("state", {})})
+        meta["ablation"] = ablation
     cond = _cond(job, deps)
     meta["unmapped"] = cond.unmapped + (missing_phrases(job.prompt, job.program) if deps.measure_factory else [])
-    measure = deps.measure_factory(job.prompt, cond) if deps.measure_factory else deps.measure
+    if deps.measure_factory and "measure" in ablation:
+        measure = deps.measure_factory(job.prompt, cond, ablation["measure"])
+    else:
+        measure = deps.measure_factory(job.prompt, cond) if deps.measure_factory else deps.measure
     log = StepLog(str(tmp / "log.jsonl"), job.split, deps.calib.tag,
                   lambda: set(deps.settings.provisional_used) | set(getattr(deps.calib, "heuristic_used", ())))
     start = time.perf_counter()
@@ -538,7 +562,8 @@ def main():
     ap.add_argument("--group", default="dev")
     ap.add_argument("--n", type=int, default=20, help="prompts per suite (suites other than M1)")
     ap.add_argument("--seeds", default="0")
-    ap.add_argument("--arms", default="unguided," + ",".join(COMPARISON_ARMS))
+    ap.add_argument("--arms", default="unguided," + ",".join(COMPARISON_ARMS),
+                    help='comma-separated arms, or "ablation" for every arm of Tab. ablation')
     ap.add_argument("--resume-from", default=None)
     ap.add_argument("--model", default="stabilityai/stable-diffusion-3-medium-diffusers")
     ap.add_argument("--tf-device", default="cuda:0")
@@ -582,7 +607,8 @@ def main():
         deps = Deps(backend, calib, measure_scene, cfg, s, unload_text=not args.tiny)
     else:
         rows = prompt_rows(args.prompt) if args.prompt else select(args.suite, args.group, args.n)
-        jobs = arm_jobs(rows, [int(x) for x in args.seeds.split(",")], args.arms.split(","))
+        arms = list(ABLATION_TABLE_ARMS) if args.arms == "ablation" else args.arms.split(",")
+        jobs = arm_jobs(rows, [int(x) for x in args.seeds.split(",")], arms)
         if args.tiny:
             seg, siglip = _tiny_estimators()
         else:
@@ -591,7 +617,7 @@ def main():
             siglip = SigLIPEvidence.from_pretrained(s.get("cfgSigLIP", str), device)
         estimators = EstimatorDeps(seg, siglip, calib, s)
         deps = Deps(backend, calib, None, cfg, s, unload_text=not args.tiny, seg=seg, sar_cfg=sar,
-                    measure_factory=lambda prompt, cond: Measure(estimators, prompt, cond))
+                    measure_factory=lambda prompt, cond, ablation="": Measure(estimators, prompt, cond, ablation))
     if args.only_prompt:
         jobs = only_prompts(jobs, args.only_prompt)
     if args.only_setting:

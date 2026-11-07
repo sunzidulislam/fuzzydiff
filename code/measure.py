@@ -16,7 +16,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from color_stats import mixture_stats, srgb_to_oklab, trimmed_mean  # noqa: E402
 from constraints import Evidence, mix_key  # noqa: E402
 from estimators import area, centroid, exclusive_core, extent, object_photometric, region_crop, scene_lightness  # noqa: E402
-from grounding import aggregate_maps, binding, binding_keys  # noqa: E402
+from grounding import aggregate_maps, binding, binding_keys, overlap  # noqa: E402
+
+MEASURE_ABLATIONS = ("attention_only", "overlap")
 
 
 def measure_scene(backend, x0, out, program, bin):
@@ -35,8 +37,12 @@ class EstimatorDeps:
 class Measure:
     """Full evidence for one prompt: supports, presence, colour, size, and attention statistics."""
 
-    def __init__(self, deps: EstimatorDeps, prompt: str, cond):
-        self.deps, self.prompt, self.cond = deps, prompt, cond
+    def __init__(self, deps: EstimatorDeps, prompt: str, cond, ablation: str = ""):
+        """ablation "attention_only": supports are the phrase attention maps instead of CLIPSeg;
+        "overlap": binding is the plain overlap b(a, q) instead of the contrastive beta(a, q)."""
+        if ablation and ablation not in MEASURE_ABLATIONS:
+            raise ValueError(f"unknown measurement ablation {ablation!r}")
+        self.deps, self.prompt, self.cond, self.ablation = deps, prompt, cond, ablation
         s = deps.settings
         self.box_k, self.erode = s.get("cfgBoxK"), s.get("cfgErode", int)
         self.tau, self.s_p = s.get("cfgSmaxTemp"), s.get("cfgSigmaP")
@@ -47,7 +53,10 @@ class Measure:
         ev = Evidence(x0=x0, scene={"scene_lightness": scene_lightness(x)})
         objects = list(dict.fromkeys(program.objects))
         if objects:
-            self._objects(x, objects, ev, bin)
+            maps = None
+            if self.ablation == "attention_only":
+                maps = self._grounded(out) if out is not None and out.maps else {}
+            self._objects(x, objects, ev, bin, maps)
         needs_colour = any(c.family in ("F6", "leakage") for c in program.constraints)
         lab = srgb_to_oklab(x) if needs_colour else None
         for c in program.constraints:
@@ -64,9 +73,9 @@ class Measure:
             self._attention(out, program, ev)
         return ev
 
-    def _objects(self, x, objects, ev, bin):
+    def _objects(self, x, objects, ev, bin, maps=None):
         d = self.deps
-        supports = d.segmenter(x, objects)
+        supports = d.segmenter(x, objects) if maps is None else self._attention_supports(x, objects, maps)
         for q in objects:
             s = supports[q]
             region = region_crop(x, s, self.box_k)
@@ -116,10 +125,27 @@ class Measure:
             g_q, g_r = extent(a["S"], axis), extent(b["S"], axis)
         ev.pairs[("F8", q, r, c.quantity)] = (g_q, g_r)
 
-    def _attention(self, out, program, ev):
-        calib = self.deps.calib
+    def _grounded(self, out):
         blocks = sorted(next(iter(out.maps.values())))
-        grounded = aggregate_maps(out, self.cond, blocks, calib.attention_thresholds("objects"))
+        return aggregate_maps(out, self.cond, blocks, self.deps.calib.attention_thresholds("objects"))
+
+    def _attention_supports(self, x, objects, grounded):
+        """Attention-only ablation: each object's normalized phrase map on the segmenter's grid.
+        An object with no map gets an empty support, so its support gate closes."""
+        grid = 64
+        out = {}
+        for q in objects:
+            g = grounded.get(q) or grounded.get(f"{q}#0")
+            if g is None or g.P.dim() != 2:
+                out[q] = torch.zeros(grid, grid, dtype=x.dtype, device=x.device)
+                continue
+            p = F.interpolate(g.P[None, None].to(x.device, x.dtype), size=(grid, grid), mode="bilinear",
+                              align_corners=False)[0, 0]
+            out[q] = p.clamp(0, 1)
+        return out
+
+    def _attention(self, out, program, ev):
+        grounded = self._grounded(out)
         for key, g in grounded.items():
             ev.attention[key] = {"P": g.P, "informative": g.informative, "peak": g.peak, "share": g.share,
                                  "mass": g.mass}
@@ -127,6 +153,9 @@ class Measure:
         for (a, q), (a_key, q_key) in binding_keys(self.prompt, program).items():
             others = [g.P for k, g in grounded.items() if k.split("#")[0] in heads and k != q_key]
             if a_key in grounded and q_key in grounded and others:
-                ev.pairs[("binding", a, q)] = binding(grounded[a_key].P, grounded[q_key].P, others, self.tau)
+                if self.ablation == "overlap":
+                    ev.pairs[("binding", a, q)] = overlap(grounded[a_key].P, grounded[q_key].P)
+                else:
+                    ev.pairs[("binding", a, q)] = binding(grounded[a_key].P, grounded[q_key].P, others, self.tau)
                 ev.raw_ok[("binding", a, q)] = (
                     grounded[a_key].informative and grounded[q_key].informative)

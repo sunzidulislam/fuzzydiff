@@ -16,7 +16,7 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from activation_schedule import bin_of  # noqa: E402
-from constraints import (Evidence, charbonnier, freeze_step, in_domain, membership, new_state, score, scorer_for,  # noqa: E402
+from constraints import (Evidence, constraint_loss, freeze_step, in_domain, membership, new_state, score, scorer_for,  # noqa: E402
                          tier_losses, violation)
 
 BINS = 4
@@ -40,6 +40,9 @@ class GuideCfg:
     log_all: bool = False                   # also measure and log steps without guidance (calibration runs)
     sigma_hi: float = 1.0
     state_kw: Dict[str, float] = field(default_factory=dict)
+    priority: bool = True                   # False: weighted sum, no projection and no per-tier acceptance
+    acceptance: bool = True                 # False: the first candidate is taken unchecked
+    cond_x0: bool = False                   # True: evidence on the conditional clean prediction, not the CFG one
 
 
 @dataclass
@@ -137,13 +140,13 @@ def _constraint_losses(frozen, evidence, calib):
     for f in frozen:
         if f.weight > 0:
             d = violation(score(f, evidence, calib), f.low, f.high)
-            out[(f.cid, f.component)] = float((f.weight * charbonnier(d, f.kappa)).detach())
+            out[(f.cid, f.component)] = float((f.weight * constraint_loss(f, d)).detach())
     return out
 
 
 def _measure(ctx, z, sigma, b, readout):
     out = ctx.backend.velocity(z, sigma, ctx.cond, readout=readout, cfg=ctx.cfg.cfg)
-    x0 = ctx.backend.decode(ctx.backend.clean(z, sigma, out.v))
+    x0 = ctx.backend.decode(ctx.backend.clean(z, sigma, out.v_cond if ctx.cfg.cond_x0 else out.v))
     return out, ctx.measure(ctx.backend, x0, out, ctx.program, b)
 
 
@@ -198,7 +201,7 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
                     if a < c and raw[a].norm() > 0 and raw[c].norm() > 0:
                         cos[f"{a}-{c}"] = float(_dot(raw[a], raw[c]) / (raw[a].double().norm() * raw[c].double().norm()))
             for m in tiers:
-                projected = project_tier(raw[m], [raw[h] for h in tiers if h < m])
+                projected = project_tier(raw[m], [raw[h] for h in tiers if h < m]) if cfg.priority else raw[m]
                 norm = raw[m].double().norm()
                 removed[str(m)] = float(1 - projected.double().norm() / norm) if norm > 0 else 0.0
                 g = g + projected
@@ -222,7 +225,7 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
                 candidate = z - eta * direction
                 with torch.no_grad():
                     out_c, ev_c = _measure(ctx, candidate, sigma, b, readout)
-                reason = _reject_reason(frozen, ev_c, ctx.calib, before, cfg)
+                reason = _reject_reason(frozen, ev_c, ctx.calib, before, cfg) if cfg.acceptance else None
                 if reason is None:
                     accepted, z_used, v_used, used_evidence = True, candidate, out_c.v.detach(), _light_evidence(ev_c)
                     after = _floats(tier_losses(frozen, ev_c, ctx.calib))
@@ -244,7 +247,7 @@ def _reject_reason(frozen, evidence, calib, before, cfg):
         if f.weight > 0 and not in_domain(f, evidence, calib):
             return "domain"
     now = _floats(tier_losses(frozen, evidence, calib))
-    for m in (1, 2):
+    for m in ((1, 2) if cfg.priority else ()):
         key = str(m)
         if key in before and now.get(key, 0.0) > before[key] + cfg.eps.get(m, 0.0):
             return f"tier{m}"
