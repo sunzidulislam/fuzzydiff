@@ -230,7 +230,7 @@ MISSING_PAGE = SUCCESS_PAGE.replace("<title>Success rating</title>", "<title>Mis
     "questions. If the object is missing, you can skip the second one.",
     "<h1>Missing objects</h1><p>Each row shows one prompt, with its images in shuffled order. For each object in each\n"
     "image, say whether it is there and whether it has the colour the prompt gives it. If an object is missing, skip its\n"
-    "colour question.").replace(
+    "colour question.").replace('images not finished yet', 'answers missing').replace(
     """  document.querySelectorAll("[data-panel]").forEach(function(p){
     var present=answer(p,"present"),acceptable=answer(p,"acceptable");
     if(present===null||(present&&acceptable===null))missing++;
@@ -238,7 +238,7 @@ MISSING_PAGE = SUCCESS_PAGE.replace("<title>Success rating</title>", "<title>Mis
     """  document.querySelectorAll("[data-panel]").forEach(function(p){
     p.querySelectorAll("[data-object]").forEach(function(o){
       var present=answer(o,"present"),colour=answer(o,"colour");
-      if(present===null||(present&&colour===null))missing++;
+      if(present===null||(present&&colour===null&&o.querySelector('[data-q="colour"]')))missing++;
       out.push({group:p.dataset.group,panel:p.dataset.panel,object:o.dataset.object,present:present,colour:colour});});});""")
 
 
@@ -247,6 +247,56 @@ def _coloured_objects(prompt):
     program = translate(prompt)
     colour = {c.args[1]: c.args[0] for c in program.constraints if c.family == "binding"}
     return [(q, colour.get(q)) for q in dict.fromkeys(program.objects)]
+
+
+MIXTURE_PAGE = MISSING_PAGE.replace("<title>Missing objects</title>", "<title>Colour mixture rating</title>").replace(
+    "<h1>Missing objects</h1>", "<h1>Colour mixture rating</h1>").replace(
+    "colour question.", "colour question. Then say whether a colour meant for one object appears on the other, and move\n"
+    "the Fidelity slider to say how well the whole image fits the prompt (0 to 100).").replace(
+    """      out.push({group:p.dataset.group,panel:p.dataset.panel,object:o.dataset.object,present:present,colour:colour});});});""",
+    """      out.push({group:p.dataset.group,panel:p.dataset.panel,object:o.dataset.object,present:present,colour:colour});});
+    var leak=answer(p,"leakage"),slider=p.querySelector("input[type=range]");
+    var fidelity=slider.dataset.touched?+slider.value:null;
+    if(leak===null||fidelity===null)missing++;
+    out.push({group:p.dataset.group,panel:p.dataset.panel,leakage:leak,fidelity:fidelity});});
+  document.querySelectorAll("input[type=range]").forEach(function(s){s.dataset.touched="";});""").replace(
+    "<script>", """<script>
+document.addEventListener("input",function(e){if(e.target.type==="range"){e.target.dataset.touched="1";
+  e.target.nextElementSibling.textContent=e.target.value;}});""")
+# the line that clears "touched" above must not run on export; remove it again
+MIXTURE_PAGE = MIXTURE_PAGE.replace("""
+  document.querySelectorAll("input[type=range]").forEach(function(s){s.dataset.touched="";});""", "")
+
+
+def _object_questions(group, letter, prompt):
+    def question(obj, name, text):
+        return (f'<p class="q">{html.escape(text)} '
+                f'<label><input type="radio" data-q="{name}" name="{group}-{letter}-{obj}-{name}" value="yes">Yes</label>'
+                f'<label><input type="radio" data-q="{name}" name="{group}-{letter}-{obj}-{name}" value="no">No</label></p>')
+    blocks = []
+    for obj, colour in _coloured_objects(prompt):
+        ask = question(obj, "present", f"Is there a {obj}?")
+        ask += question(obj, "colour", f"Is the {obj} {colour}?") if colour else ""
+        blocks.append(f'<div data-object="{html.escape(obj)}">{ask}</div>')
+    return "".join(blocks)
+
+
+def _key_objects(prompt):
+    pairs = _coloured_objects(prompt)
+    return {"objects": [q for q, _ in pairs], "coloured": [q for q, c in pairs if c]}
+
+
+def build_mixture_page(out_dir, out: Path, seed: int, arms=FMAS_ARMS) -> None:
+    """Exp. ii in one pass: missing objects (per object), attribute leakage and Fidelity (per image)."""
+    def controls(group, letter, prompt):
+        leak = (f'<p class="q">Is a colour meant for one object on the wrong object? '
+                f'<label><input type="radio" data-q="leakage" name="{group}-{letter}-leakage" value="yes">Yes</label>'
+                f'<label><input type="radio" data-q="leakage" name="{group}-{letter}-leakage" value="no">No</label></p>')
+        fidelity = ('<p class="q">Fidelity: how well does the whole image fit the prompt? '
+                    '<input type="range" min="0" max="100" value="50"> <b>not set</b></p>')
+        return _object_questions(group, letter, prompt) + leak + fidelity
+    Path(out).write_text(MIXTURE_PAGE % {"groups": _blind_groups(out_dir, out, seed, arms, "mixture", controls, _key_objects)},
+                         encoding="utf-8")
 
 
 def build_missing_page(out_dir, out: Path, seed: int, arms=FMAS_ARMS) -> None:
@@ -275,6 +325,10 @@ def score_missing(ratings: Path, key: Path) -> dict:
         rated = json.load(f)
     with open(key) as f:
         groups = json.load(f)
+    return _score_missing_rows([r for r in rated if "object" in r], groups)
+
+
+def _score_missing_rows(rated, groups) -> dict:
     answers = defaultdict(dict)
     for r in rated:
         answers[(r["group"], r["panel"])][r["object"]] = r
@@ -355,6 +409,40 @@ def score_success(ratings: Path, key: Path) -> dict:
             "n_prompts": len(by_prompt), "unrated": unrated,
             "comparisons": {f"{a} - {b}": _paired_comparison(by_prompt, a, b) for a, b in FMAS_COMPARISONS},
             "note": "pilot only: author ratings and provisional calibration"}
+
+
+def score_mixture(ratings: Path, key: Path) -> dict:
+    """Exp. ii: missing objects (lenient, strict), leakage in percent of images, and mean Fidelity (0 to 100)."""
+    with open(ratings) as f:
+        rated = json.load(f)
+    with open(key) as f:
+        groups = json.load(f)
+    missing = _score_missing_rows([r for r in rated if "object" in r], groups)
+    leakage, fidelity, unrated = {}, {}, missing["unrated"]
+    for r in (r for r in rated if "object" not in r):
+        entry = groups[r["group"]]
+        arm = entry["panels"][r["panel"]]
+        if r["leakage"] is None or r["fidelity"] is None:
+            unrated += 1
+            continue
+        if not 0 <= r["fidelity"] <= 100:
+            raise ValueError(f"fidelity {r['fidelity']} is outside 0 to 100")
+        leakage.setdefault(entry["prompt"], {})[arm] = 100.0 if r["leakage"] else 0.0
+        fidelity.setdefault(entry["prompt"], {})[arm] = float(r["fidelity"])
+
+    def per_arm(table):
+        values = defaultdict(list)
+        for scores in table.values():
+            for arm, v in scores.items():
+                values[arm].append(v)
+        return {arm: sum(v) / len(v) for arm, v in values.items()}
+    comparisons = {"missing_lenient": missing["comparisons"]["lenient"], "missing_strict": missing["comparisons"]["strict"],
+                   "leakage": {f"{a} - {b}": _paired_comparison(leakage, a, b, lower_is_better=True) for a, b in FMAS_COMPARISONS},
+                   "fidelity": {f"{a} - {b}": _paired_comparison(fidelity, a, b) for a, b in FMAS_COMPARISONS}}
+    return {"missing": {"lenient": missing["lenient"], "strict": missing["strict"]}, "leakage": per_arm(leakage),
+            "fidelity": per_arm(fidelity), "n_prompts": len({e["prompt"] for e in groups.values()}), "unrated": unrated,
+            "comparisons": comparisons,
+            "note": "missing and leakage: lower is better; fidelity: higher is better; pilot only: author ratings and provisional calibration"}
 
 
 def score_m1(ratings: Path, key: Path, out_dir: Path, settings) -> dict:

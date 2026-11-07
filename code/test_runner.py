@@ -12,8 +12,8 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from annotate import (FMAS_ARMS, build_comparison_page, build_fmas_page, build_missing_page, build_rating_page,  # noqa: E402
-                      build_success_page, export_mask_tasks, export_rating_tasks, import_masks, import_ratings, score_fmas,
-                      score_m1, score_missing, score_success)
+                      build_mixture_page, build_success_page, export_mask_tasks, export_rating_tasks, import_masks,
+                      import_ratings, score_fmas, score_m1, score_missing, score_mixture, score_success)
 from calibration_fit import FittedCalibration  # noqa: E402
 from fit_calibration import fit_main, rows_from_run  # noqa: E402
 from reporting import read_jsonl, tier_rows  # noqa: E402
@@ -455,6 +455,61 @@ def test_missing_does_not_wait_for_a_colour_answer_on_an_object_with_no_colour()
         _missing_ratings(tmp, lambda prompt, arm, obj: (True, None if obj == "teapot" else True))
         r = score_missing(tmp / "ratings.json", tmp / "missing.key.json")
         assert r["unrated"] == 0 and r["strict"]["stage1"] == 0.0
+    with_tmp(body)
+
+
+def _mixture_ratings(tmp, chosen, per_image):
+    """chosen(prompt, arm, object) -> (present, colour); per_image(prompt, arm) -> (leakage, fidelity)."""
+    key = json.loads((tmp / "mixture.key.json").read_text())
+    out = []
+    for group, entry in key.items():
+        for panel, arm in entry["panels"].items():
+            for obj in entry["objects"]:
+                present, colour = chosen(entry["prompt"], arm, obj)
+                out.append({"group": group, "panel": panel, "object": obj, "present": present, "colour": colour})
+            leakage, fidelity = per_image(entry["prompt"], arm)
+            out.append({"group": group, "panel": panel, "leakage": leakage, "fidelity": fidelity})
+    (tmp / "ratings.json").write_text(json.dumps(out))
+
+
+def test_mixture_page_asks_missing_leakage_and_fidelity_once_per_image():
+    def body(tmp):
+        _fmas_run(tmp, MIX_PROMPTS[:2])
+        build_mixture_page(tmp, tmp / "mixture.html", seed=3)
+        page = (tmp / "mixture.html").read_text(encoding="utf-8")
+        assert not any(arm in page for arm in FMAS_ARMS)
+        assert "Is the mug greenish-gray?" in page and "wrong object" in page and "Fidelity" in page
+        n_images = 2 * len(FMAS_ARMS)
+        assert page.count('data-q="leakage"') == 2 * n_images and page.count('type="range"') == n_images
+    with_tmp(body)
+
+
+def test_mixture_scores_all_three_measures_on_the_same_images():
+    def body(tmp):
+        _fmas_run(tmp, MIX_PROMPTS)
+        build_mixture_page(tmp, tmp / "mixture.html", seed=3)
+        _mixture_ratings(tmp, lambda prompt, arm, obj: (True, arm != "unguided"),
+                         lambda prompt, arm: (arm == "unguided", 20 if arm == "unguided" else 80))
+        r = score_mixture(tmp / "ratings.json", tmp / "mixture.key.json")
+        assert r["missing"]["lenient"]["unguided"] == 0.0 and r["missing"]["strict"]["unguided"] == 100.0
+        assert r["leakage"] == {"unguided": 100.0, "stage1": 0.0, "stage1_plain": 0.0, "stage1_sar": 0.0}
+        assert r["fidelity"]["unguided"] == 20.0 and r["fidelity"]["stage1_sar"] == 80.0
+        leak = r["comparisons"]["leakage"]["stage1 - unguided"]
+        assert leak["difference"] == -100.0 and leak["better"] == 4
+        fid = r["comparisons"]["fidelity"]["stage1 - unguided"]
+        assert fid["difference"] == 60.0 and fid["better"] == 4
+        assert r["n_prompts"] == 4 and r["unrated"] == 0
+    with_tmp(body)
+
+
+def test_mixture_counts_an_untouched_fidelity_slider_as_unrated():
+    def body(tmp):
+        _fmas_run(tmp, MIX_PROMPTS[:2])
+        build_mixture_page(tmp, tmp / "mixture.html", seed=3)
+        _mixture_ratings(tmp, lambda prompt, arm, obj: (True, True),
+                         lambda prompt, arm: (False, None if arm == "stage1" else 70))
+        r = score_mixture(tmp / "ratings.json", tmp / "mixture.key.json")
+        assert r["unrated"] == 2 and "stage1" not in r["fidelity"] and r["missing"]["strict"]["stage1"] == 0.0
     with_tmp(body)
 
 
