@@ -209,7 +209,7 @@ class Mixture(Scorer):
         return component == "main"
 
     def components(self, c):
-        return ["main", "e", "varpi", "zeta"]
+        return ["main", "e", "varpi", "zeta", "dl"]
 
     def _stats(self, c, evidence):
         return evidence.objects.get(c.args[0], {}).get(mix_key(c.quantity))

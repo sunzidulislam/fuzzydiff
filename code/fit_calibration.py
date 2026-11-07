@@ -197,7 +197,7 @@ def fit_main(input_path, out_path, settings=None, min_images=None):
     n_min = min_images if min_images is not None else s.get("cfgNmin")
     parts = {"valid": {}, "stage2_valid": {b: False for b in BINS},
              "fallback_intervals": _heuristics(s),
-             "bounds": {name: [s.get(f"f6_{name}_max"), s.get("f6_bound_kappa")] for name in ("e", "varpi", "zeta")},
+             "bounds": {name: [s.get(f"f6_{name}_max"), s.get("f6_bound_kappa")] for name in ("e", "varpi", "zeta", "dl")},
              "leakage_scale": s.get("leakage_tau"), "psi": s.get("psi"),
              "size": {"c68": s.get("size_c68"), "c95": s.get("size_c95")},
              "prototypes": {t: srgb_to_oklab(torch.tensor(rgb, dtype=torch.float64).view(3, 1, 1)).view(3).tolist()

@@ -69,6 +69,16 @@ def erode_core(s, k=3):
     return -F.max_pool2d(-s[None, None], k, stride=1, padding=k // 2)[0, 0]
 
 
+def exclusive_core(s, others, k, threshold, temp):
+    """Pixels confidently of this object, where no other object is stronger. CLIPSeg's map stays well
+    above zero on other objects, so an eroded map alone averages their colours in (Kaggle: a red mug
+    scored 0.5 because its mask reached the blue teapot)."""
+    gate = torch.sigmoid((s - threshold) / temp)
+    for other in others:
+        gate = gate * torch.sigmoid((s - other) / temp)
+    return erode_core(s, k) * gate.detach()
+
+
 # ---------------------------------------------------------------------------- support geometry
 def _coords(s):
     h, w = s.shape

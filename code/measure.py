@@ -15,7 +15,7 @@ import torch.nn.functional as F
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from color_stats import mixture_stats, srgb_to_oklab, trimmed_mean  # noqa: E402
 from constraints import Evidence, mix_key  # noqa: E402
-from estimators import area, centroid, erode_core, extent, object_photometric, region_crop, scene_lightness  # noqa: E402
+from estimators import area, centroid, exclusive_core, extent, object_photometric, region_crop, scene_lightness  # noqa: E402
 from grounding import aggregate_maps, binding, binding_keys  # noqa: E402
 
 
@@ -40,6 +40,7 @@ class Measure:
         s = deps.settings
         self.box_k, self.erode = s.get("cfgBoxK"), s.get("cfgErode", int)
         self.tau, self.s_p = s.get("cfgSmaxTemp"), s.get("cfgSigmaP")
+        self.core_threshold, self.core_temp = s.get("core_threshold"), s.get("core_temp")
 
     def __call__(self, backend, x0, out, program, bin) -> Evidence:
         x = x0[0] if x0.dim() == 4 else x0
@@ -71,7 +72,9 @@ class Measure:
             region = region_crop(x, s, self.box_k)
             g, r = d.siglip.logits(x, region, q)
             h = d.calib.presence_logit(bin, g, r)
-            ev.objects[q] = {"S": s, "core": erode_core(s, self.erode), "A": area(s), "c": centroid(s), "h": h,
+            others = [supports[r] for r in objects if r != q]
+            core = exclusive_core(s, others, self.erode, self.core_threshold, self.core_temp)
+            ev.objects[q] = {"S": s, "core": core, "A": area(s), "c": centroid(s), "h": h,
                              "g": g.detach(), "r": r.detach(),
                              "p": torch.sigmoid(h.detach()), "psi": d.calib.psi(q, {})}
 

@@ -101,7 +101,7 @@ def test_native_scores_are_not_tapered_at_their_bounds():
 def _f6_mu(x):
     prog, ev = measure_x(x, "a greenish-gray mug and a blue teapot")
     frozen = [f for f in freeze_step(prog, ev, PROV, 4, new_state()) if f.constraint.family == "F6"]
-    assert {f.component for f in frozen} == {"main", "e", "varpi", "zeta"}
+    assert {f.component for f in frozen} == {"main", "e", "varpi", "zeta", "dl"}
     product = 1.0
     for f in frozen:
         product *= float(membership(score(f, ev, PROV), f.low, f.high, f.kappa))
@@ -122,6 +122,52 @@ def test_blend_rejects_two_tone():
             two_tone[i, r:r + 16, :64] = a[i]
             two_tone[i, r + 16:r + 32, :64] = b[i]
     assert _f6_mu(uniform) > _f6_mu(two_tone) + 0.1
+
+
+RED_MUG = "a slightly red mug and a blue teapot"
+
+
+def _red_stats(x, masks):
+    prog = translate(RED_MUG)
+    deps = EstimatorDeps(FakeSupport(lambda phrase, image: masks[phrase]),
+                         FakeSigLIP(lambda phrase, image: torch.tensor(5.0, dtype=DT)), PROV, S)
+    ev = Measure(deps, RED_MUG, None)(None, x, None, prog, 4)
+    return prog, ev
+
+
+def _leaky_masks():
+    """Like real CLIPSeg: strong on its own object, weak but far from zero on the other one."""
+    left, right = half_masks()["mug"], half_masks()["teapot"]
+    return {"mug": 0.9 * left + 0.35 * right, "teapot": 0.9 * right + 0.1 * left}
+
+
+def test_mixture_ignores_another_object_under_a_leaky_mask():
+    x = solid(proto_rgb("red"), proto_rgb("blue"))
+    prog, ev = _red_stats(x, _leaky_masks())
+    mix = next(f for f in freeze_step(prog, ev, PROV, 4, new_state()) if f.constraint.family == "F6" and f.component == "main")
+    assert float(score(mix, ev, PROV)) > 0.9        # a fully red mug, not one averaged with the blue teapot
+
+
+def test_an_objects_core_leaves_out_the_other_object():
+    masks = _leaky_masks()
+    _, ev = _red_stats(solid(proto_rgb("red"), proto_rgb("blue")), masks)
+    teapot_core = ev.objects["teapot"]["core"]
+    on_mug = teapot_core[half_masks()["mug"] > 0]
+    assert float(on_mug.max()) < 0.01 * float(teapot_core.max())    # leakage reads this core, not the colour being tested
+
+
+def test_a_darkened_mug_does_not_pass_as_a_faint_colour():
+    red = PROV.prototype("red")
+    faint = oklab_to_srgb(torch.stack([red[0], 0.15 * red[1], 0.15 * red[2]]).view(3, 1, 1)).view(3).tolist()
+    dark = oklab_to_srgb(torch.stack([red[0] - 0.25, 0.15 * red[1], 0.15 * red[2]]).view(3, 1, 1)).view(3).tolist()
+
+    def mu(rgb):
+        prog, ev = _red_stats(solid(rgb, proto_rgb("blue")), half_masks())
+        frozen = [f for f in freeze_step(prog, ev, PROV, 4, new_state()) if f.constraint.family == "F6"]
+        assert {f.component for f in frozen} == {"main", "e", "varpi", "zeta", "dl"}
+        m = next(f for f in frozen if f.component == "dl")
+        return float(membership(score(m, ev, PROV), m.low, m.high, m.kappa))
+    assert mu(faint) > 0.99 and mu(dark) < 0.5
 
 
 def test_mixture_support_weight_has_no_gradient():

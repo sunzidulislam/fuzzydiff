@@ -88,7 +88,7 @@ class ProvisionalCalibration:
         return (max(center - half, 0.0), min(center + half, 1.0), self.s.get("hedge_kappa"))
 
     def bound(self, name):
-        """Upper bounds of the F6 blend definition (e, varpi, zeta)."""
+        """Upper bounds of the F6 blend definition (e, varpi, zeta, dl)."""
         return (self.s.get(f"f6_{name}_max"), self.s.get("f6_bound_kappa"))
 
     def leakage_scale(self):

@@ -119,6 +119,8 @@ def mixture_stats(lab, w, c1, c2, sigma_p=2.0, trim=0.1, eps=1e-6):
       e     = |Cbar - C1 - rho v| / |v| = |sum omega_i r_i| / |v|   off-axis mean
       varpi = sum omega_i (t_i - tbar)^2 / (tbar (1 - tbar) + eps) in [0, 1)   axial dispersion
       zeta  = sum omega_i |r_i|^2 / |v|^2 >= 0   orthogonal (pixel-level) dispersion
+      dl    = |L(Cbar) - L(C1 + rho v)|          lightness away from the mixture's own; the chromatic
+                                                 axis alone would let darkening pass as a fainter colour
     varpi misses two-tone surfaces whose colors differ perpendicular to the axis (equal s_i);
     zeta catches them. e only sees the mean residual, which cancels for symmetric off-axis pairs."""
     lb = _blur(lab, sigma_p)
@@ -136,7 +138,8 @@ def mixture_stats(lab, w, c1, c2, sigma_p=2.0, trim=0.1, eps=1e-6):
     tb = (omega * t).sum()
     varpi = (omega * (t - tb) ** 2).sum() / (tb * (1 - tb) + eps)
     zeta = (omega * (R ** 2).sum(0)).sum() / vv
-    return {"rho": rho, "e": e, "varpi": varpi, "zeta": zeta, "cbar": cbar}
+    dl = torch.abs(cbar[0] - (c1[0] + rho.clamp(0, 1) * (c2[0] - c1[0])))
+    return {"rho": rho, "e": e, "varpi": varpi, "zeta": zeta, "dl": dl, "cbar": cbar}
 
 
 def mixture(lab, w, c1, c2, trim=0.1, sigma_p=2.0):
