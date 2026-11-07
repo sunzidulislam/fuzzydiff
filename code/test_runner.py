@@ -22,7 +22,7 @@ from estimators import FakeSigLIP, FakeSupport  # noqa: E402
 from measure import EstimatorDeps, Measure, measure_scene  # noqa: E402
 from predicates import Constraint, Program, translate  # noqa: E402
 from run_experiment import (Deps, Job, arm_jobs, commanded_targets, describe_program, guide_cfg, image_id, m1_jobs, merge_logs,  # noqa: E402
-                            only_prompts, only_settings, placebo_source, prompt_rows, run_jobs, summarize_arms)
+                            only_prompts, only_settings, placebo_source, prompt_rows, run_jobs, summarize_arms, with_overrides)
 from sar import SarCfg  # noqa: E402
 from sd3_backend import tiny_backend  # noqa: E402
 from settings import load_settings  # noqa: E402
@@ -180,6 +180,28 @@ def test_only_settings_keeps_unguided_and_the_chosen_settings():
 def test_guidance_start_comes_from_the_settings():
     s = load_settings()
     assert guide_cfg(s).sigma_hi == 0.75 and "cfgSigmaHi" in s.provisional_used
+
+
+def test_a_step_limit_from_the_command_line_reaches_the_jobs_and_keeps_their_own_settings():
+    jobs = with_overrides(m1_jobs(True)[:6], dmax=0.4)
+    assert all(j.overrides["dmax"] == 0.4 for j in jobs)
+    assert jobs[5].overrides["sigma_hi"] == 0.75
+    assert with_overrides(jobs, dmax=None) == jobs
+
+
+def test_a_step_limit_changes_a_guided_run_and_is_recorded():
+    def run(dmax):
+        result = {}
+
+        def body(tmp):
+            rows = prompt_rows(["a red mug and a blue teapot"])
+            jobs = with_overrides(arm_jobs(rows, (0,), ["stage1"]), dmax=dmax)
+            s = run_jobs(jobs, four_arm_deps(), tmp)
+            assert s.failed == 0, s.failures
+            result["meta"] = json.loads((tmp / "stage1" / image_id(rows[0].prompt, 0) / "meta.json").read_text())
+        with_tmp(body)
+        return result["meta"]
+    assert run(0.4)["overrides"]["dmax"] == 0.4 and run(None)["overrides"] == {}
 
 
 def test_only_prompts_refuses_a_prompt_the_suite_does_not_have():

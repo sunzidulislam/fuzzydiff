@@ -468,6 +468,12 @@ def only_settings(jobs: List[Job], settings) -> List[Job]:
     return [j for j in jobs if j.arm == "unguided" or setting(j) in settings]
 
 
+def with_overrides(jobs: List[Job], **overrides) -> List[Job]:
+    """The same jobs with these guidance settings; None leaves a setting alone."""
+    chosen = {k: v for k, v in overrides.items() if v is not None}
+    return [dataclasses.replace(j, overrides={**j.overrides, **chosen}) for j in jobs] if chosen else jobs
+
+
 def arm_jobs(rows, seeds, arms) -> List[Job]:
     """Arms in the given order, so Stage 1 of every prompt finishes before any Stage-2 arm starts."""
     jobs = []
@@ -545,6 +551,7 @@ def main():
     ap.add_argument("--tiny", action="store_true", help="smoke test on the tiny random model (CPU)")
     ap.add_argument("--only-prompt", action="append", help="run only this prompt from the suite; can be repeated")
     ap.add_argument("--only-setting", action="append", help="run only this tuning setting and unguided; can be repeated")
+    ap.add_argument("--dmax", type=float, default=None, help="largest change to one latent value per step, for trying other limits")
     ap.add_argument("--limit", type=int, default=None, help="only the first N jobs")
     ap.add_argument("--calibration", default=None, help="fitted calibration file; provisional values if omitted")
     ap.add_argument("--manifest", default=None, help="frozen support manifest; required for --group test")
@@ -588,7 +595,7 @@ def main():
         jobs = only_prompts(jobs, args.only_prompt)
     if args.only_setting:
         jobs = only_settings(jobs, args.only_setting)
-    result = run_jobs(jobs[:args.limit], deps, args.out, resume_from=args.resume_from)
+    result = run_jobs(with_overrides(jobs, dmax=args.dmax)[:args.limit], deps, args.out, resume_from=args.resume_from)
     n = merge_logs(args.out, Path(args.out) / "all.jsonl")
     print(json.dumps({"done": result.done, "skipped": result.skipped, "failed": result.failed,
                       "failures": result.failures[:20], "log_records": n, "arms": summarize_arms(args.out)}, indent=1))
