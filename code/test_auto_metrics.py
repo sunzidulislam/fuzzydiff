@@ -131,6 +131,29 @@ def test_an_arm_with_no_images_is_left_out_without_failing():
     with_tmp(body)
 
 
+def test_a_run_restored_from_its_rating_page_scores_like_the_run():
+    from annotate import build_fmas_page
+    from restore_run import restore
+
+    def body(tmp):
+        colours = {}
+        for prompt, good in (("a red mug", (255, 0, 0)), ("a green vase", (0, 255, 0))):
+            colours[("unguided", prompt)] = (0, 0, 255)
+            for arm in ARMS[1:]:
+                colours[(arm, prompt)] = good
+        _run(tmp / "run", colours)
+        build_fmas_page(tmp / "run", tmp / "fmas.html", seed=0)
+        assert restore(tmp / "fmas.html", tmp / "fmas.key.json", tmp / "restored") == 8
+        meta = json.loads(next((tmp / "restored" / "stage1").glob("*/meta.json")).read_text())
+        assert meta["restored_from"] == "fmas.html"
+        before = summarize(score_run(tmp / "run", ARMS, FakeClip(), FakeCaptioner()))
+        after = summarize(score_run(tmp / "restored", ARMS, FakeClip(), FakeCaptioner()))
+        for arm in ARMS:
+            assert abs(before["text_image"][arm] - after["text_image"][arm]) < 0.02
+        assert after["n_prompts"] == 2
+    with_tmp(body)
+
+
 def main():
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
