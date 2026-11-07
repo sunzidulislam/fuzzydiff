@@ -43,15 +43,15 @@ from grounding import missing_phrases, phrase_spans  # noqa: E402
 from guidance import BINS, GuideCfg, Stage1Out, run_stage1, score_image  # noqa: E402
 from measure import EstimatorDeps, Measure, measure_scene  # noqa: E402
 from predicates import Constraint, Program, translate  # noqa: E402
-from prompts import PromptRow, base_prompt, enumerate_suite, select  # noqa: E402
+from prompts import PromptRow, base_prompt, degree_word, enumerate_suite, hedge_of, select, select_ladders  # noqa: E402
 from reporting import LeakageError, StepLog  # noqa: E402
 from sar import SarCfg, build_priors, run_stage2  # noqa: E402
-from sd3_backend import load_backend, tiny_backend  # noqa: E402
+from sd3_backend import load_backend, tiny_backend, weight_span  # noqa: E402
 from settings import load_settings  # noqa: E402
 
 COMMANDED = {"darker": -1, "brighter": +1}
 TARGET_BAND = 0.02
-UNGUIDED_ARMS = {"unguided", "ladder_unguided"}
+UNGUIDED_ARMS = {"unguided", "ladder_unguided", "prompt_weight"}
 STAGE2_MODES = {"stage1_plain": "plain", "stage1_sar": "sar", "stage1_placebo": "sar", "stage1_sar_nocheck": "sar"}
 COMPARISON_ARMS = ("stage1", "stage1_plain", "stage1_sar", "stage1_placebo")
 # Tab. ablation: each Stage-1 arm changes one component. Values are GuideCfg fields, StepState fields
@@ -69,6 +69,11 @@ ABLATION_ARMS = {
 }
 ABLATION_TABLE_ARMS = ("unguided", "stage1", *ABLATION_ARMS, "stage1_plain", "stage1_sar", "stage1_placebo",
                        "stage1_sar_nocheck")
+# Tab. hedge ladder. prompt_weight is SD3 with the word the hedge modifies weighted by the hedge
+# (A1111-style weights, linear in hedge rank); the hedge stays in the prompt.
+LADDER_ARMS = ("unguided", "prompt_weight", "stage1", "stage1_sar")
+LADDER_SUITES = ("ladder_attribute", "ladder_mixture", "ladder_size")
+HEDGE_WEIGHTS = {"barely": 0.5, "slightly": 0.75, "moderately": 1.0, "very": 1.25, "extremely": 1.5}
 
 
 class JobFailure(RuntimeError):
@@ -206,6 +211,15 @@ def _cond(job: Job, deps: Deps):
     return deps.backend.encode_prompt(job.prompt, spans)
 
 
+def _prompt_weighted(cond, prompt):
+    """The degree word weighted by its hedge, e.g. "dark" in "a very dark mug" times 1.25."""
+    hedge, word = hedge_of(prompt), degree_word(prompt)
+    words = prompt.split(" ")
+    start = len(" ".join(words[:words.index(hedge) + 1])) + 1
+    weight = HEDGE_WEIGHTS[hedge]
+    return weight_span(cond, (start, start + len(word)), weight), {"word": word, "weight": weight}
+
+
 def _save_stage1(result, tmp):
     torch.save({"latent": result.latent.detach().cpu(), "traces": {k: v.cpu() for k, v in result.traces.items()},
                 "supports": {k: v.cpu() for k, v in result.supports.items()}, "finals": result.finals,
@@ -302,6 +316,8 @@ def _execute(job: Job, deps: Deps, out: Path, tmp: Path) -> dict:
                                   state_kw={**cfg.state_kw, **ablation.get("state", {})})
         meta["ablation"] = ablation
     cond = _cond(job, deps)
+    if job.arm == "prompt_weight":
+        cond, meta["prompt_weight"] = _prompt_weighted(cond, job.prompt)
     meta["unmapped"] = cond.unmapped + (missing_phrases(job.prompt, job.program) if deps.measure_factory else [])
     if deps.measure_factory and "measure" in ablation:
         measure = deps.measure_factory(job.prompt, cond, ablation["measure"])
@@ -556,14 +572,14 @@ def _tiny_estimators():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--suite", choices=["m1_tune", "m1_eval", "plain_color", "mixture", "size", "soft"])
+    ap.add_argument("--suite", choices=["m1_tune", "m1_eval", "plain_color", "mixture", "size", "soft", *LADDER_SUITES])
     ap.add_argument("--prompt", action="append", help="your own prompt instead of a suite; can be repeated")
     ap.add_argument("--out", required=True)
     ap.add_argument("--group", default="dev")
-    ap.add_argument("--n", type=int, default=20, help="prompts per suite (suites other than M1)")
+    ap.add_argument("--n", type=int, default=20, help="prompts per suite (suites other than M1); base prompts for ladders")
     ap.add_argument("--seeds", default="0")
     ap.add_argument("--arms", default="unguided," + ",".join(COMPARISON_ARMS),
-                    help='comma-separated arms, or "ablation" for every arm of Tab. ablation')
+                    help='comma-separated arms, "ablation" for every arm of Tab. ablation, or "ladder" for Tab. hedge ladder')
     ap.add_argument("--resume-from", default=None)
     ap.add_argument("--model", default="stabilityai/stable-diffusion-3-medium-diffusers")
     ap.add_argument("--tf-device", default="cuda:0")
@@ -606,8 +622,13 @@ def main():
         jobs = m1_jobs(args.suite == "m1_tune")
         deps = Deps(backend, calib, measure_scene, cfg, s, unload_text=not args.tiny)
     else:
-        rows = prompt_rows(args.prompt) if args.prompt else select(args.suite, args.group, args.n)
-        arms = list(ABLATION_TABLE_ARMS) if args.arms == "ablation" else args.arms.split(",")
+        if args.prompt:
+            rows = prompt_rows(args.prompt)
+        elif args.suite in LADDER_SUITES:
+            rows = select_ladders(args.suite, args.group, args.n)
+        else:
+            rows = select(args.suite, args.group, args.n)
+        arms = {"ablation": list(ABLATION_TABLE_ARMS), "ladder": list(LADDER_ARMS)}.get(args.arms, args.arms.split(","))
         jobs = arm_jobs(rows, [int(x) for x in args.seeds.split(",")], arms)
         if args.tiny:
             seg, siglip = _tiny_estimators()

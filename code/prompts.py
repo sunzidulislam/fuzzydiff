@@ -127,8 +127,31 @@ def _ladder():
         yield f"a {d} {n}", ()
 
 
+# Tab. hedge ladder: each base prompt at barely < slightly < moderately < very < extremely.
+LADDER_HEDGES = ("barely", "slightly", "moderately", "very", "extremely")
+LADDER_ATTRIBUTES = ("dark", "bright", "pale", "vivid", "faded", "muted", "saturated")   # luminance or saturation
+
+
+def _ladder_attribute():
+    for h, a, o in itertools.product(LADDER_HEDGES, LADDER_ATTRIBUTES, vocab()["objects"]):
+        yield f"{_art(h)} {h} {a} {o}", (o,)
+
+
+def _ladder_mixture():
+    v = vocab()
+    for h, t, o in itertools.product(LADDER_HEDGES, v["mixture_terms"], v["objects"][:v["mixture_objects"]]):
+        yield f"{_art(h)} {h} {t} {o}", (o,)
+
+
+def _ladder_size():
+    v = vocab()
+    for (o1, o2), h, c in itertools.product(itertools.permutations(v["objects"], 2), LADDER_HEDGES, v["comparatives"]):
+        yield f"{_art(o1)} {o1} {h} {c} than {_art(o2)} {o2}", (o1, o2)
+
+
 SUITES = {"soft": _soft, "mixture": _mixture, "size": _size, "plain_color": _plain,
-          "m1_tune": lambda: _nouns("m1_tune"), "m1_eval": lambda: _nouns("m1_eval"), "m1_ladder": _ladder}
+          "m1_tune": lambda: _nouns("m1_tune"), "m1_eval": lambda: _nouns("m1_eval"), "m1_ladder": _ladder,
+          "ladder_attribute": _ladder_attribute, "ladder_mixture": _ladder_mixture, "ladder_size": _ladder_size}
 
 
 @lru_cache(maxsize=None)
@@ -153,6 +176,39 @@ def select(suite: str, group: str, n: int, seed: int = 0, include_unseen: bool =
             if len(chosen) == n:
                 return chosen
     raise ValueError(f"suite {suite} has only {len(chosen)} base prompts in group {group}, asked for {n}")
+
+
+def hedge_of(prompt: str) -> str:
+    """The ladder hedge in a prompt."""
+    return next(w for w in prompt.split() if w in LADDER_HEDGES)
+
+
+def degree_word(prompt: str) -> str:
+    """The word the hedge modifies: the attribute, the colour term, or the comparative."""
+    words = prompt.split()
+    return words[words.index(hedge_of(prompt)) + 1]
+
+
+def select_ladders(suite: str, group: str, n: int, seed: int = 0) -> List[PromptRow]:
+    """n base prompts, each at every ladder hedge in order. Bases are taken in turn from each degree word
+    (attribute, colour term or comparative), so a few bases still cover different words."""
+    by_base = {}
+    for r in _enumerate(suite):
+        if r.group == group and not r.unseen:
+            by_base.setdefault(r.base, {})[hedge_of(r.prompt)] = r
+    bases = sorted(b for b, rows in by_base.items() if len(rows) == len(LADDER_HEDGES))
+    random.Random(f"{suite}|{group}|{seed}").shuffle(bases)
+    queues = {}
+    for b in bases:
+        queues.setdefault(degree_word(by_base[b]["barely"].prompt), []).append(b)
+    chosen = []
+    while len(chosen) < n and any(queues.values()):
+        for word in list(queues):
+            if queues[word] and len(chosen) < n:
+                chosen.append(queues[word].pop(0))
+    if len(chosen) < n:
+        raise ValueError(f"suite {suite} has only {len(chosen)} ladder bases in group {group}, asked for {n}")
+    return [by_base[b][h] for b in chosen for h in LADDER_HEDGES]
 
 
 def m1_nouns():

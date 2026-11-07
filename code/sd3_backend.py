@@ -9,6 +9,7 @@ mode, so dropout and normalization behave as in inference.
 """
 from __future__ import annotations
 
+import dataclasses
 import gc
 import hashlib
 import os
@@ -38,6 +39,36 @@ class TextCond:
     phrase_tokens: Dict[str, List[int]]
     t5_offsets: List[Tuple[int, int]]
     unmapped: List[str] = field(default_factory=list)
+    clip_offsets: List[Tuple[int, int]] = field(default_factory=list)   # character span of each CLIP token
+
+
+def weight_span(cond: TextCond, span: Tuple[int, int], weight: float) -> TextCond:
+    """Prompt weighting: the conditional embeddings of every CLIP and T5 token overlapping span, times
+    weight. The unconditional and pooled embeddings stay as they are."""
+    start, end = span
+    idx = [j for j, (a, b) in enumerate(cond.clip_offsets) if b > a and a < end and b > start]
+    idx += [CLIP_TOKENS + j for j, (a, b) in enumerate(cond.t5_offsets) if b > a and a < end and b > start]
+    if not idx:
+        raise ValueError(f"no token overlaps characters {start} to {end}")
+    embeds = cond.embeds.clone()
+    embeds[:, idx] = embeds[:, idx] * weight
+    return dataclasses.replace(cond, embeds=embeds)
+
+
+def clip_offsets(tokenizer, prompt: str) -> List[Tuple[int, int]]:
+    """Character span of each CLIP token, found by matching token text left to right; (0, 0) for
+    special and padding tokens. Both CLIP encoders of SD3 share this tokenization."""
+    ids = tokenizer(prompt, padding="max_length", max_length=CLIP_TOKENS, truncation=True)["input_ids"]
+    text, pos, out = prompt.lower(), 0, []
+    for token in tokenizer.convert_ids_to_tokens(ids):
+        piece = token.replace("</w>", "")
+        at = -1 if token.startswith("<|") or not piece else text.find(piece, pos)
+        if at < 0:
+            out.append((0, 0))
+            continue
+        out.append((at, at + len(piece)))
+        pos = at + len(piece)
+    return out
 
 
 @dataclass
@@ -213,7 +244,8 @@ def _pipeline_encoder(pipe, device):
         clip = pipe.tokenizer(prompt, padding="max_length", max_length=CLIP_TOKENS, truncation=True)
         valid = [j for j, m in enumerate(clip["attention_mask"]) if m]
         valid += [CLIP_TOKENS + j for j, m in enumerate(t5["attention_mask"]) if m]
-        return TextCond(embeds, pooled, uncond, uncond_pooled, valid, {}, [tuple(o) for o in t5["offset_mapping"]])
+        return TextCond(embeds, pooled, uncond, uncond_pooled, valid, {}, [tuple(o) for o in t5["offset_mapping"]],
+                        clip_offsets=clip_offsets(pipe.tokenizer, prompt))
     return encode
 
 
@@ -249,7 +281,7 @@ def _tiny_encoder(dt, n_t5=8):
         n = CLIP_TOKENS + n_t5
         valid = list(range(4)) + [CLIP_TOKENS + j for j, (a, b) in enumerate(offsets) if b > a]
         return TextCond(rand(prompt, (1, n, 32)), rand(prompt, (1, 16)), rand("", (1, n, 32)), rand("", (1, 16)),
-                        valid, {}, offsets)
+                        valid, {}, offsets, clip_offsets=[(0, 0)] + offsets[:3])
     return encode
 
 
