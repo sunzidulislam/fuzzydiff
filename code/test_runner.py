@@ -11,9 +11,9 @@ import torch
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from annotate import (FMAS_ARMS, build_comparison_page, build_fmas_page, build_rating_page, build_success_page,  # noqa: E402
-                      export_mask_tasks, export_rating_tasks, import_masks, import_ratings, score_fmas, score_m1,
-                      score_success)
+from annotate import (FMAS_ARMS, build_comparison_page, build_fmas_page, build_missing_page, build_rating_page,  # noqa: E402
+                      build_success_page, export_mask_tasks, export_rating_tasks, import_masks, import_ratings, score_fmas,
+                      score_m1, score_missing, score_success)
 from calibration_fit import FittedCalibration  # noqa: E402
 from fit_calibration import fit_main, rows_from_run  # noqa: E402
 from reporting import read_jsonl, tier_rows  # noqa: E402
@@ -375,6 +375,86 @@ def test_success_counts_an_unanswered_image_as_unrated_and_not_as_a_failure():
         r = score_success(tmp / "ratings.json", tmp / "success.key.json")
         assert r["unrated"] == 2 and r["success_rate"]["stage1"] == 100.0
         assert r["comparisons"]["stage1 - unguided"]["n"] == 1
+    with_tmp(body)
+
+
+MIX_PROMPTS = ["a greenish-gray mug and a turquoise-green teapot", "a coral-orange bottle and a purple-pink vase",
+               "a bluish-purple plate and a yellowish-orange book", "a pinkish-white clock and a grayish-blue chair"]
+
+
+def _missing_ratings(tmp, chosen):
+    """chosen(prompt, arm, object) -> (present, colour_right)."""
+    key = json.loads((tmp / "missing.key.json").read_text())
+    out = []
+    for group, entry in key.items():
+        for panel, arm in entry["panels"].items():
+            for obj in entry["objects"]:
+                present, colour = chosen(entry["prompt"], arm, obj)
+                out.append({"group": group, "panel": panel, "object": obj, "present": present, "colour": colour})
+    (tmp / "ratings.json").write_text(json.dumps(out))
+
+
+def test_missing_page_asks_about_each_object_and_its_colour():
+    def body(tmp):
+        _fmas_run(tmp, MIX_PROMPTS[:2])
+        build_missing_page(tmp, tmp / "missing.html", seed=2)
+        page = (tmp / "missing.html").read_text(encoding="utf-8")
+        assert not any(arm in page for arm in FMAS_ARMS)
+        assert "Is there a mug?" in page and "Is the mug greenish-gray?" in page and "Is the vase purple-pink?" in page
+        assert page.count('value="yes"') == 2 * 2 * len(FMAS_ARMS) * 2
+        key = json.loads((tmp / "missing.key.json").read_text())
+        assert sorted(tuple(e["objects"]) for e in key.values()) == [("bottle", "vase"), ("mug", "teapot")]
+    with_tmp(body)
+
+
+def test_missing_lenient_ignores_colour_and_strict_counts_it():
+    def body(tmp):
+        _fmas_run(tmp, MIX_PROMPTS)
+
+        def chosen(prompt, arm, obj):
+            if arm == "unguided":
+                return (False, None) if obj == "teapot" or obj == "vase" else (True, False)
+            if arm == "stage1":
+                return (True, False) if obj in ("mug", "bottle") else (True, True)
+            return (True, True)
+        build_missing_page(tmp, tmp / "missing.html", seed=2)
+        _missing_ratings(tmp, chosen)
+        r = score_missing(tmp / "ratings.json", tmp / "missing.key.json")
+        assert r["lenient"] == {"unguided": 50.0, "stage1": 0.0, "stage1_plain": 0.0, "stage1_sar": 0.0}
+        assert r["strict"] == {"unguided": 100.0, "stage1": 50.0, "stage1_plain": 0.0, "stage1_sar": 0.0}
+        first = r["comparisons"]["lenient"]["stage1 - unguided"]
+        assert first["difference"] == -50.0 and first["better"] == 2 and first["worse"] == 0 and first["same"] == 2
+        assert r["comparisons"]["strict"]["stage1_sar - stage1"]["better"] == 2
+        assert r["n_prompts"] == 4 and r["unrated"] == 0 and "lower is better" in r["note"]
+    with_tmp(body)
+
+
+def test_missing_needs_every_answer_for_an_image_except_colour_of_an_absent_object():
+    def body(tmp):
+        _fmas_run(tmp, MIX_PROMPTS[:2])
+
+        def chosen(prompt, arm, obj):
+            if arm == "stage1" and obj == "mug":
+                return (True, None)                 # colour question skipped on a present object
+            if arm == "unguided" and obj == "teapot":
+                return (False, None)                # absent: no colour answer needed
+            return (True, True)
+        build_missing_page(tmp, tmp / "missing.html", seed=2)
+        _missing_ratings(tmp, chosen)
+        r = score_missing(tmp / "ratings.json", tmp / "missing.key.json")
+        assert r["unrated"] == 1 and r["strict"]["unguided"] == 50.0
+        assert r["comparisons"]["strict"]["stage1 - unguided"]["n"] == 1
+    with_tmp(body)
+
+
+def test_missing_does_not_wait_for_a_colour_answer_on_an_object_with_no_colour():
+    def body(tmp):
+        _fmas_run(tmp, ["a red mug and a teapot"])
+        build_missing_page(tmp, tmp / "missing.html", seed=2)
+        assert "Is the teapot" not in (tmp / "missing.html").read_text(encoding="utf-8")
+        _missing_ratings(tmp, lambda prompt, arm, obj: (True, None if obj == "teapot" else True))
+        r = score_missing(tmp / "ratings.json", tmp / "missing.key.json")
+        assert r["unrated"] == 0 and r["strict"]["stage1"] == 0.0
     with_tmp(body)
 
 

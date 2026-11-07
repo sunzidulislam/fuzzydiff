@@ -23,6 +23,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from predicates import translate  # noqa: E402
 from reporting import cluster_bootstrap, slope_through_origin  # noqa: E402
 
 PAGE = """<!doctype html><meta charset="utf-8"><title>Blind rating</title>
@@ -141,7 +142,7 @@ document.getElementById("export").onclick=function(){
 </script>"""
 
 
-def _blind_groups(out_dir, out: Path, seed: int, arms, tag, panel_controls):
+def _blind_groups(out_dir, out: Path, seed: int, arms, tag, panel_controls, extra=None):
     """One section per prompt, arms in shuffled panels, the prompt shown and the arm hidden. Writes the key."""
     out_dir = Path(out_dir)
     rng = random.Random(seed)
@@ -159,13 +160,13 @@ def _blind_groups(out_dir, out: Path, seed: int, arms, tag, panel_controls):
             prompt = json.load(f)["prompt"]
         order = list(arms)
         rng.shuffle(order)
-        key[group] = {"prompt": prompt, "panels": {}}
+        key[group] = {"prompt": prompt, "panels": {}, **(extra(prompt) if extra else {})}
         panels = []
         for letter, arm in zip("ABCDEFGH", order):
             key[group]["panels"][letter] = arm
             panels.append(f'<figure data-panel="{letter}" data-group="{group}"><figcaption>{letter}</figcaption>'
                           f'<img alt="panel {letter}" src="data:image/jpeg;base64,{_encode(found[arm])}">'
-                          f'{panel_controls(group, letter)}</figure>')
+                          f'{panel_controls(group, letter, prompt)}</figure>')
         groups.append(f"<section><h2>{html.escape(prompt)}</h2><div class=panels>{''.join(panels)}</div></section>")
     with open(Path(out).with_suffix(".key.json"), "w") as f:
         json.dump(key, f, indent=1)
@@ -173,7 +174,7 @@ def _blind_groups(out_dir, out: Path, seed: int, arms, tag, panel_controls):
 
 
 def build_fmas_page(out_dir, out: Path, seed: int, arms=FMAS_ARMS) -> None:
-    def controls(group, letter):
+    def controls(group, letter, prompt):
         return "".join(f'<label><input type="radio" name="{group}-{letter}" value="{v}">{v}</label>'
                        for v in range(1, FMAS_POINTS + 1))
     Path(out).write_text(FMAS_PAGE % {"groups": _blind_groups(out_dir, out, seed, arms, "fmas", controls)}, encoding="utf-8")
@@ -203,7 +204,7 @@ document.getElementById("export").onclick=function(){
 
 
 def build_success_page(out_dir, out: Path, seed: int, arms=FMAS_ARMS) -> None:
-    def controls(group, letter):
+    def controls(group, letter, prompt):
         def question(name, text):
             return (f'<p class="q">{text} '
                     f'<label><input type="radio" data-q="{name}" name="{group}-{letter}-{name}" value="yes">Yes</label>'
@@ -212,14 +213,98 @@ def build_success_page(out_dir, out: Path, seed: int, arms=FMAS_ARMS) -> None:
     Path(out).write_text(SUCCESS_PAGE % {"groups": _blind_groups(out_dir, out, seed, arms, "success", controls)}, encoding="utf-8")
 
 
-def _paired_comparison(by_prompt, a, b):
+def _paired_comparison(by_prompt, a, b, lower_is_better=False):
     rows = [{"prompt": p, "d": r[a] - r[b]} for p, r in sorted(by_prompt.items()) if a in r and b in r]
     if not rows:
         return {"n": 0, "difference": None, "ci95": None, "better": 0, "worse": 0, "same": 0}
     low, high = cluster_bootstrap(rows, lambda rs: sum(r["d"] for r in rs) / len(rs))
     diffs = [r["d"] for r in rows]
-    return {"n": len(rows), "difference": sum(diffs) / len(diffs), "ci95": [low, high], "better": sum(d > 0 for d in diffs),
-            "worse": sum(d < 0 for d in diffs), "same": sum(d == 0 for d in diffs)}
+    up, down = sum(d > 0 for d in diffs), sum(d < 0 for d in diffs)
+    return {"n": len(rows), "difference": sum(diffs) / len(diffs), "ci95": [low, high],
+            "better": down if lower_is_better else up, "worse": up if lower_is_better else down,
+            "same": sum(d == 0 for d in diffs)}
+
+
+MISSING_PAGE = SUCCESS_PAGE.replace("<title>Success rating</title>", "<title>Missing objects</title>").replace(
+    "<h1>Success rating</h1><p>Each row shows one prompt, with its images in shuffled order. For each image, answer both\n"
+    "questions. If the object is missing, you can skip the second one.",
+    "<h1>Missing objects</h1><p>Each row shows one prompt, with its images in shuffled order. For each object in each\n"
+    "image, say whether it is there and whether it has the colour the prompt gives it. If an object is missing, skip its\n"
+    "colour question.").replace(
+    """  document.querySelectorAll("[data-panel]").forEach(function(p){
+    var present=answer(p,"present"),acceptable=answer(p,"acceptable");
+    if(present===null||(present&&acceptable===null))missing++;
+    out.push({group:p.dataset.group,panel:p.dataset.panel,present:present,acceptable:acceptable});});""",
+    """  document.querySelectorAll("[data-panel]").forEach(function(p){
+    p.querySelectorAll("[data-object]").forEach(function(o){
+      var present=answer(o,"present"),colour=answer(o,"colour");
+      if(present===null||(present&&colour===null))missing++;
+      out.push({group:p.dataset.group,panel:p.dataset.panel,object:o.dataset.object,present:present,colour:colour});});});""")
+
+
+def _coloured_objects(prompt):
+    """Objects in prompt order, each with the colour term bound to it, if any."""
+    program = translate(prompt)
+    colour = {c.args[1]: c.args[0] for c in program.constraints if c.family == "binding"}
+    return [(q, colour.get(q)) for q in dict.fromkeys(program.objects)]
+
+
+def build_missing_page(out_dir, out: Path, seed: int, arms=FMAS_ARMS) -> None:
+    def controls(group, letter, prompt):
+        def question(obj, name, text):
+            return (f'<p class="q">{html.escape(text)} '
+                    f'<label><input type="radio" data-q="{name}" name="{group}-{letter}-{obj}-{name}" value="yes">Yes</label>'
+                    f'<label><input type="radio" data-q="{name}" name="{group}-{letter}-{obj}-{name}" value="no">No</label></p>')
+        blocks = []
+        for obj, colour in _coloured_objects(prompt):
+            ask = question(obj, "present", f"Is there a {obj}?")
+            ask += question(obj, "colour", f"Is the {obj} {colour}?") if colour else ""
+            blocks.append(f'<div data-object="{html.escape(obj)}">{ask}</div>')
+        return "".join(blocks)
+
+    def objects(prompt):
+        pairs = _coloured_objects(prompt)
+        return {"objects": [q for q, _ in pairs], "coloured": [q for q, c in pairs if c]}
+    Path(out).write_text(MISSING_PAGE % {"groups": _blind_groups(out_dir, out, seed, arms, "missing", controls, objects)},
+                         encoding="utf-8")
+
+
+def score_missing(ratings: Path, key: Path) -> dict:
+    """Missing objects in percent of images, lenient (absent) and strict (absent or wrong colour); lower is better."""
+    with open(ratings) as f:
+        rated = json.load(f)
+    with open(key) as f:
+        groups = json.load(f)
+    answers = defaultdict(dict)
+    for r in rated:
+        answers[(r["group"], r["panel"])][r["object"]] = r
+    by_prompt = {"lenient": {}, "strict": {}}
+    unrated = 0
+    for (group, panel), objs in answers.items():
+        entry = groups[group]
+        expected = entry["objects"]
+        rows = [objs.get(q) for q in expected]
+        coloured = set(entry.get("coloured", expected))
+        if any(r is None or r["present"] is None or (r["present"] and q in coloured and r["colour"] is None)
+               for q, r in zip(expected, rows)):
+            unrated += 1
+            continue
+        arm = entry["panels"][panel]
+        absent = any(not r["present"] for r in rows)
+        wrong = any(r["present"] and r["colour"] is False for r in rows)
+        by_prompt["lenient"].setdefault(entry["prompt"], {})[arm] = 100.0 if absent else 0.0
+        by_prompt["strict"].setdefault(entry["prompt"], {})[arm] = 100.0 if absent or wrong else 0.0
+    out = {"n_prompts": len(by_prompt["lenient"]), "unrated": unrated, "comparisons": {},
+           "note": "lower is better; pilot only: author ratings and provisional calibration"}
+    for kind, table in by_prompt.items():
+        per_arm = defaultdict(list)
+        for scores in table.values():
+            for arm, value in scores.items():
+                per_arm[arm].append(value)
+        out[kind] = {arm: sum(v) / len(v) for arm, v in per_arm.items()}
+        out["comparisons"][kind] = {f"{a} - {b}": _paired_comparison(table, a, b, lower_is_better=True)
+                                    for a, b in FMAS_COMPARISONS}
+    return out
 
 
 def score_fmas(ratings: Path, key: Path, points: int = FMAS_POINTS) -> dict:
