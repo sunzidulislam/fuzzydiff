@@ -11,8 +11,8 @@ import torch
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from annotate import (build_comparison_page, build_rating_page, export_mask_tasks, export_rating_tasks,  # noqa: E402
-                      import_masks, import_ratings, score_m1)
+from annotate import (FMAS_ARMS, build_comparison_page, build_fmas_page, build_rating_page, export_mask_tasks,  # noqa: E402
+                      export_rating_tasks, import_masks, import_ratings, score_fmas, score_m1)
 from calibration_fit import FittedCalibration  # noqa: E402
 from fit_calibration import fit_main, rows_from_run  # noqa: E402
 from reporting import read_jsonl, tier_rows  # noqa: E402
@@ -226,6 +226,96 @@ def test_only_prompts_refuses_a_prompt_the_suite_does_not_have():
         assert "a bakry" in str(e)
     else:
         raise AssertionError("a misspelled prompt must not silently run nothing")
+
+
+def _fmas_run(tmp, prompts, arms=FMAS_ARMS, skip=()):
+    for prompt in prompts:
+        for arm in arms:
+            if (arm, prompt) in skip:
+                continue
+            d = tmp / arm / image_id(prompt, 0)
+            d.mkdir(parents=True)
+            Image.new("RGB", (8, 8), (10, 20, 30)).save(d / "image.png")
+            (d / "meta.json").write_text(json.dumps({"prompt": prompt, "arm": arm, "seed": 0}))
+
+
+def _fmas_ratings(tmp, chosen):
+    """Ratings by arm, as a person would export them from the page."""
+    key = json.loads((tmp / "fmas.key.json").read_text())
+    out = []
+    for group, entry in key.items():
+        for panel, arm in entry["panels"].items():
+            out.append({"group": group, "panel": panel, "rating": chosen(entry["prompt"], arm)})
+    (tmp / "ratings.json").write_text(json.dumps(out))
+
+
+def test_fmas_page_shows_the_prompt_but_never_the_method():
+    def body(tmp):
+        prompts = ["a slightly dark mug", "a very pale vase"]
+        _fmas_run(tmp, prompts)
+        build_fmas_page(tmp, tmp / "fmas.html", seed=0)
+        page = (tmp / "fmas.html").read_text(encoding="utf-8")
+        assert all(p in page for p in prompts)
+        assert not any(arm in page for arm in FMAS_ARMS)
+        key = json.loads((tmp / "fmas.key.json").read_text())
+        assert sorted(e["prompt"] for e in key.values()) == sorted(prompts)
+        assert all(sorted(e["panels"].values()) == sorted(FMAS_ARMS) for e in key.values())
+        orders = {tuple(e["panels"][p] for p in sorted(e["panels"])) for e in key.values()}
+        assert page.count('type="radio"') == 5 * len(FMAS_ARMS) * len(prompts)
+        assert orders
+    with_tmp(body)
+
+
+def test_fmas_page_leaves_out_a_prompt_missing_a_method():
+    def body(tmp):
+        _fmas_run(tmp, ["a slightly dark mug", "a very pale vase"], skip={("stage1_sar", "a very pale vase")})
+        build_fmas_page(tmp, tmp / "fmas.html", seed=0)
+        key = json.loads((tmp / "fmas.key.json").read_text())
+        assert [e["prompt"] for e in key.values()] == ["a slightly dark mug"]
+    with_tmp(body)
+
+
+def test_fmas_score_rescales_to_one_and_compares_methods_on_the_same_prompts():
+    def body(tmp):
+        prompts = [f"a slightly dark {o}" for o in ("mug", "vase", "lamp", "book")]
+        _fmas_run(tmp, prompts)
+        build_fmas_page(tmp, tmp / "fmas.html", seed=0)
+        table = {"unguided": 1, "stage1": 3, "stage1_plain": 3, "stage1_sar": 5}
+        _fmas_ratings(tmp, lambda prompt, arm: table[arm])
+        r = score_fmas(tmp / "ratings.json", tmp / "fmas.key.json")
+        assert r["avg_fmas"] == {"unguided": 0.0, "stage1": 0.5, "stage1_plain": 0.5, "stage1_sar": 1.0}
+        assert r["n_prompts"] == 4 and r["unrated"] == 0 and "pilot" in r["note"]
+        first = r["comparisons"]["stage1 - unguided"]
+        assert first["difference"] == 0.5 and first["better"] == 4 and first["worse"] == 0 and first["ci95"] == [0.5, 0.5]
+        assert r["comparisons"]["stage1_sar - stage1"]["difference"] == 0.5
+        assert r["comparisons"]["stage1_sar - stage1_plain"]["difference"] == 0.5
+    with_tmp(body)
+
+
+def test_fmas_score_counts_unrated_panels_and_drops_only_their_comparisons():
+    def body(tmp):
+        prompts = ["a slightly dark mug", "a very pale vase"]
+        _fmas_run(tmp, prompts)
+        build_fmas_page(tmp, tmp / "fmas.html", seed=0)
+        _fmas_ratings(tmp, lambda prompt, arm: None if (prompt, arm) == (prompts[0], "stage1") else 5)
+        r = score_fmas(tmp / "ratings.json", tmp / "fmas.key.json")
+        assert r["unrated"] == 1 and r["comparisons"]["stage1 - unguided"]["n"] == 1
+        assert r["comparisons"]["stage1_sar - stage1_plain"]["n"] == 2
+    with_tmp(body)
+
+
+def test_fmas_score_refuses_a_rating_outside_the_scale():
+    def body(tmp):
+        _fmas_run(tmp, ["a slightly dark mug"])
+        build_fmas_page(tmp, tmp / "fmas.html", seed=0)
+        _fmas_ratings(tmp, lambda prompt, arm: 6)
+        try:
+            score_fmas(tmp / "ratings.json", tmp / "fmas.key.json")
+        except ValueError as e:
+            assert "6" in str(e)
+        else:
+            raise AssertionError("a rating of 6 on a 5-point scale must not be averaged in")
+    with_tmp(body)
 
 
 def test_score_m1_against_known_outcome():

@@ -23,7 +23,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from reporting import slope_through_origin  # noqa: E402
+from reporting import cluster_bootstrap, slope_through_origin  # noqa: E402
 
 PAGE = """<!doctype html><meta charset="utf-8"><title>Blind rating</title>
 <style>body{font:15px system-ui;margin:0 auto;max-width:640px;padding:16px}figure{margin:0 0 28px}
@@ -116,6 +116,96 @@ def build_comparison_page(out_dir, out: Path, seed: int, arms=("stage1", "stage1
     out.write_text(COMPARE_PAGE % {"groups": "\n".join(groups)}, encoding="utf-8")
     with open(out.with_suffix(".key.json"), "w") as f:
         json.dump(key, f, indent=1)
+
+
+FMAS_ARMS = ("unguided", "stage1", "stage1_plain", "stage1_sar")
+FMAS_POINTS = 5
+FMAS_COMPARISONS = (("stage1", "unguided"), ("stage1_sar", "stage1"), ("stage1_sar", "stage1_plain"))
+FMAS_PAGE = """<!doctype html><meta charset="utf-8"><title>FMAS rating</title>
+<style>body{font:15px system-ui;margin:0 auto;max-width:980px;padding:16px}
+.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+figure{margin:0}img{width:100%%;display:block}label{margin-right:10px}textarea{width:100%%;height:140px}
+section{margin-bottom:36px}</style>
+<h1>FMAS rating</h1><p>Each row shows one prompt, with its images in shuffled order. Rate how well the degree in
+each image matches the degree the prompt asks for (words like "slightly" or "very"), from 1 (not at all) to 5
+(exactly). Rate from what you see, without guessing how the image was made.</p>
+%(groups)s
+<button id="export">Show ratings</button> <span id="missing"></span><textarea id="result" readonly></textarea>
+<script>
+document.getElementById("export").onclick=function(){
+  var out=[],missing=0;document.querySelectorAll("[data-panel]").forEach(function(p){
+    var c=p.querySelector("input:checked");if(!c)missing++;
+    out.push({group:p.dataset.group,panel:p.dataset.panel,rating:c?+c.value:null});});
+  document.getElementById("missing").textContent=missing?missing+" images not rated yet":"All images rated";
+  document.getElementById("result").value=JSON.stringify(out);};
+</script>"""
+
+
+def build_fmas_page(out_dir, out: Path, seed: int, arms=FMAS_ARMS) -> None:
+    """One section per prompt, arms in shuffled panels, the prompt shown and the arm hidden."""
+    out_dir = Path(out_dir)
+    rng = random.Random(seed)
+    per_image = {}
+    for arm in arms:
+        for path in sorted((out_dir / arm).glob("*/image.png")):
+            per_image.setdefault(path.parent.name, {})[arm] = path
+    ids = [i for i, found in sorted(per_image.items()) if len(found) == len(arms)]
+    rng.shuffle(ids)
+    groups, key = [], {}
+    for n, image in enumerate(ids):
+        group = hashlib.sha256(f"{seed}|fmas|{n}".encode()).hexdigest()[:10]
+        found = per_image[image]
+        with open(found[arms[0]].parent / "meta.json") as f:
+            prompt = json.load(f)["prompt"]
+        order = list(arms)
+        rng.shuffle(order)
+        key[group] = {"prompt": prompt, "panels": {}}
+        panels = []
+        for letter, arm in zip("ABCDEFGH", order):
+            key[group]["panels"][letter] = arm
+            choices = "".join(f'<label><input type="radio" name="{group}-{letter}" value="{v}">{v}</label>'
+                              for v in range(1, FMAS_POINTS + 1))
+            panels.append(f'<figure data-panel="{letter}" data-group="{group}"><figcaption>{letter}</figcaption>'
+                          f'<img alt="panel {letter}" src="data:image/jpeg;base64,{_encode(found[arm])}">{choices}</figure>')
+        groups.append(f"<section><h2>{html.escape(prompt)}</h2><div class=panels>{''.join(panels)}</div></section>")
+    out = Path(out)
+    out.write_text(FMAS_PAGE % {"groups": "\n".join(groups)}, encoding="utf-8")
+    with open(out.with_suffix(".key.json"), "w") as f:
+        json.dump(key, f, indent=1)
+
+
+def _fmas_comparison(by_prompt, a, b):
+    rows = [{"prompt": p, "d": r[a] - r[b]} for p, r in sorted(by_prompt.items()) if a in r and b in r]
+    if not rows:
+        return {"n": 0, "difference": None, "ci95": None, "better": 0, "worse": 0, "same": 0}
+    low, high = cluster_bootstrap(rows, lambda rs: sum(r["d"] for r in rs) / len(rs))
+    diffs = [r["d"] for r in rows]
+    return {"n": len(rows), "difference": sum(diffs) / len(diffs), "ci95": [low, high], "better": sum(d > 0 for d in diffs),
+            "worse": sum(d < 0 for d in diffs), "same": sum(d == 0 for d in diffs)}
+
+
+def score_fmas(ratings: Path, key: Path, points: int = FMAS_POINTS) -> dict:
+    """Avg FMAS per arm, rescaled to [0, 1], and paired differences on the same prompts."""
+    with open(ratings) as f:
+        rated = json.load(f)
+    with open(key) as f:
+        groups = json.load(f)
+    by_prompt, unrated = {}, 0
+    for r in rated:
+        if r["rating"] is None:
+            unrated += 1
+            continue
+        if not 1 <= r["rating"] <= points:
+            raise ValueError(f"rating {r['rating']} is outside the scale 1 to {points}")
+        entry = groups[r["group"]]
+        by_prompt.setdefault(entry["prompt"], {})[entry["panels"][r["panel"]]] = (r["rating"] - 1) / (points - 1)
+    per_arm = defaultdict(list)
+    for scores in by_prompt.values():
+        for arm, value in scores.items():
+            per_arm[arm].append(value)
+    return {"avg_fmas": {arm: sum(v) / len(v) for arm, v in per_arm.items()}, "n_prompts": len(by_prompt), "unrated": unrated,
+            "comparisons": {f"{a} - {b}": _fmas_comparison(by_prompt, a, b) for a, b in FMAS_COMPARISONS},
+            "note": "pilot only: author ratings and provisional calibration"}
 
 
 def score_m1(ratings: Path, key: Path, out_dir: Path, settings) -> dict:
