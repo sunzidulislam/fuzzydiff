@@ -11,8 +11,9 @@ import torch
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from annotate import (FMAS_ARMS, build_comparison_page, build_fmas_page, build_rating_page, export_mask_tasks,  # noqa: E402
-                      export_rating_tasks, import_masks, import_ratings, score_fmas, score_m1)
+from annotate import (FMAS_ARMS, build_comparison_page, build_fmas_page, build_rating_page, build_success_page,  # noqa: E402
+                      export_mask_tasks, export_rating_tasks, import_masks, import_ratings, score_fmas, score_m1,
+                      score_success)
 from calibration_fit import FittedCalibration  # noqa: E402
 from fit_calibration import fit_main, rows_from_run  # noqa: E402
 from reporting import read_jsonl, tier_rows  # noqa: E402
@@ -315,6 +316,65 @@ def test_fmas_score_refuses_a_rating_outside_the_scale():
             assert "6" in str(e)
         else:
             raise AssertionError("a rating of 6 on a 5-point scale must not be averaged in")
+    with_tmp(body)
+
+
+def _success_ratings(tmp, chosen):
+    key = json.loads((tmp / "success.key.json").read_text())
+    out = []
+    for group, entry in key.items():
+        for panel, arm in entry["panels"].items():
+            present, acceptable = chosen(entry["prompt"], arm)
+            out.append({"group": group, "panel": panel, "present": present, "acceptable": acceptable})
+    (tmp / "ratings.json").write_text(json.dumps(out))
+
+
+def test_success_page_shows_the_prompt_and_asks_both_questions_without_the_method():
+    def body(tmp):
+        prompts = ["a slightly dark mug", "a very pale vase"]
+        _fmas_run(tmp, prompts)
+        build_success_page(tmp, tmp / "success.html", seed=1)
+        page = (tmp / "success.html").read_text(encoding="utf-8")
+        assert all(p in page for p in prompts) and not any(arm in page for arm in FMAS_ARMS)
+        assert page.count('value="yes"') == 2 * len(FMAS_ARMS) * len(prompts)
+        key = json.loads((tmp / "success.key.json").read_text())
+        assert all(sorted(e["panels"].values()) == sorted(FMAS_ARMS) for e in key.values())
+    with_tmp(body)
+
+
+def test_success_needs_the_object_and_an_acceptable_degree():
+    def body(tmp):
+        prompts = [f"a slightly dark {o}" for o in ("mug", "vase", "lamp", "book")]
+        _fmas_run(tmp, prompts)
+        build_success_page(tmp, tmp / "success.html", seed=1)
+        table = {"unguided": (True, False), "stage1": (True, True), "stage1_plain": (False, None), "stage1_sar": (True, True)}
+        _success_ratings(tmp, lambda prompt, arm: table[arm])
+        r = score_success(tmp / "ratings.json", tmp / "success.key.json")
+        assert r["success_rate"] == {"unguided": 0.0, "stage1": 100.0, "stage1_plain": 0.0, "stage1_sar": 100.0}
+        assert r["object_present"]["stage1_plain"] == 0.0 and r["object_present"]["unguided"] == 100.0
+        assert r["n_prompts"] == 4 and r["unrated"] == 0 and "pilot" in r["note"]
+        first = r["comparisons"]["stage1 - unguided"]
+        assert first["difference"] == 100.0 and first["better"] == 4 and first["worse"] == 0
+        assert r["comparisons"]["stage1_sar - stage1"]["difference"] == 0.0
+    with_tmp(body)
+
+
+def test_success_counts_an_unanswered_image_as_unrated_and_not_as_a_failure():
+    def body(tmp):
+        prompts = ["a slightly dark mug", "a very pale vase"]
+        _fmas_run(tmp, prompts)
+        build_success_page(tmp, tmp / "success.html", seed=1)
+
+        def chosen(prompt, arm):
+            if arm == "stage1" and prompt == prompts[0]:
+                return (True, None)                 # the degree question was skipped
+            if arm == "unguided" and prompt == prompts[0]:
+                return (None, None)
+            return (True, True)
+        _success_ratings(tmp, chosen)
+        r = score_success(tmp / "ratings.json", tmp / "success.key.json")
+        assert r["unrated"] == 2 and r["success_rate"]["stage1"] == 100.0
+        assert r["comparisons"]["stage1 - unguided"]["n"] == 1
     with_tmp(body)
 
 

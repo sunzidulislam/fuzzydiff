@@ -141,8 +141,8 @@ document.getElementById("export").onclick=function(){
 </script>"""
 
 
-def build_fmas_page(out_dir, out: Path, seed: int, arms=FMAS_ARMS) -> None:
-    """One section per prompt, arms in shuffled panels, the prompt shown and the arm hidden."""
+def _blind_groups(out_dir, out: Path, seed: int, arms, tag, panel_controls):
+    """One section per prompt, arms in shuffled panels, the prompt shown and the arm hidden. Writes the key."""
     out_dir = Path(out_dir)
     rng = random.Random(seed)
     per_image = {}
@@ -153,7 +153,7 @@ def build_fmas_page(out_dir, out: Path, seed: int, arms=FMAS_ARMS) -> None:
     rng.shuffle(ids)
     groups, key = [], {}
     for n, image in enumerate(ids):
-        group = hashlib.sha256(f"{seed}|fmas|{n}".encode()).hexdigest()[:10]
+        group = hashlib.sha256(f"{seed}|{tag}|{n}".encode()).hexdigest()[:10]
         found = per_image[image]
         with open(found[arms[0]].parent / "meta.json") as f:
             prompt = json.load(f)["prompt"]
@@ -163,18 +163,56 @@ def build_fmas_page(out_dir, out: Path, seed: int, arms=FMAS_ARMS) -> None:
         panels = []
         for letter, arm in zip("ABCDEFGH", order):
             key[group]["panels"][letter] = arm
-            choices = "".join(f'<label><input type="radio" name="{group}-{letter}" value="{v}">{v}</label>'
-                              for v in range(1, FMAS_POINTS + 1))
             panels.append(f'<figure data-panel="{letter}" data-group="{group}"><figcaption>{letter}</figcaption>'
-                          f'<img alt="panel {letter}" src="data:image/jpeg;base64,{_encode(found[arm])}">{choices}</figure>')
+                          f'<img alt="panel {letter}" src="data:image/jpeg;base64,{_encode(found[arm])}">'
+                          f'{panel_controls(group, letter)}</figure>')
         groups.append(f"<section><h2>{html.escape(prompt)}</h2><div class=panels>{''.join(panels)}</div></section>")
-    out = Path(out)
-    out.write_text(FMAS_PAGE % {"groups": "\n".join(groups)}, encoding="utf-8")
-    with open(out.with_suffix(".key.json"), "w") as f:
+    with open(Path(out).with_suffix(".key.json"), "w") as f:
         json.dump(key, f, indent=1)
+    return "\n".join(groups)
 
 
-def _fmas_comparison(by_prompt, a, b):
+def build_fmas_page(out_dir, out: Path, seed: int, arms=FMAS_ARMS) -> None:
+    def controls(group, letter):
+        return "".join(f'<label><input type="radio" name="{group}-{letter}" value="{v}">{v}</label>'
+                       for v in range(1, FMAS_POINTS + 1))
+    Path(out).write_text(FMAS_PAGE % {"groups": _blind_groups(out_dir, out, seed, arms, "fmas", controls)}, encoding="utf-8")
+
+
+SUCCESS_PAGE = """<!doctype html><meta charset="utf-8"><title>Success rating</title>
+<style>body{font:15px system-ui;margin:0 auto;max-width:980px;padding:16px}
+.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+figure{margin:0}img{width:100%%;display:block}label{margin-right:10px}p.q{margin:6px 0}textarea{width:100%%;height:140px}
+section{margin-bottom:36px}</style>
+<h1>Success rating</h1><p>Each row shows one prompt, with its images in shuffled order. For each image, answer both
+questions. If the object is missing, you can skip the second one. Answer from what you see, without guessing how the
+image was made.</p>
+%(groups)s
+<button id="export">Show ratings</button> <span id="missing"></span><textarea id="result" readonly></textarea>
+<script>
+document.getElementById("export").onclick=function(){
+  var out=[],missing=0;
+  function answer(p,q){var c=p.querySelector('input[data-q="'+q+'"]:checked');return c?c.value==="yes":null;}
+  document.querySelectorAll("[data-panel]").forEach(function(p){
+    var present=answer(p,"present"),acceptable=answer(p,"acceptable");
+    if(present===null||(present&&acceptable===null))missing++;
+    out.push({group:p.dataset.group,panel:p.dataset.panel,present:present,acceptable:acceptable});});
+  document.getElementById("missing").textContent=missing?missing+" images not finished yet":"All images rated";
+  document.getElementById("result").value=JSON.stringify(out);};
+</script>"""
+
+
+def build_success_page(out_dir, out: Path, seed: int, arms=FMAS_ARMS) -> None:
+    def controls(group, letter):
+        def question(name, text):
+            return (f'<p class="q">{text} '
+                    f'<label><input type="radio" data-q="{name}" name="{group}-{letter}-{name}" value="yes">Yes</label>'
+                    f'<label><input type="radio" data-q="{name}" name="{group}-{letter}-{name}" value="no">No</label></p>')
+        return question("present", "Is the object there?") + question("acceptable", "Is the degree acceptable?")
+    Path(out).write_text(SUCCESS_PAGE % {"groups": _blind_groups(out_dir, out, seed, arms, "success", controls)}, encoding="utf-8")
+
+
+def _paired_comparison(by_prompt, a, b):
     rows = [{"prompt": p, "d": r[a] - r[b]} for p, r in sorted(by_prompt.items()) if a in r and b in r]
     if not rows:
         return {"n": 0, "difference": None, "ci95": None, "better": 0, "worse": 0, "same": 0}
@@ -204,7 +242,33 @@ def score_fmas(ratings: Path, key: Path, points: int = FMAS_POINTS) -> dict:
         for arm, value in scores.items():
             per_arm[arm].append(value)
     return {"avg_fmas": {arm: sum(v) / len(v) for arm, v in per_arm.items()}, "n_prompts": len(by_prompt), "unrated": unrated,
-            "comparisons": {f"{a} - {b}": _fmas_comparison(by_prompt, a, b) for a, b in FMAS_COMPARISONS},
+            "comparisons": {f"{a} - {b}": _paired_comparison(by_prompt, a, b) for a, b in FMAS_COMPARISONS},
+            "note": "pilot only: author ratings and provisional calibration"}
+
+
+def score_success(ratings: Path, key: Path) -> dict:
+    """Success Rate per arm in percent: the object is present and its degree acceptable."""
+    with open(ratings) as f:
+        rated = json.load(f)
+    with open(key) as f:
+        groups = json.load(f)
+    by_prompt, present_by_arm, unrated = {}, defaultdict(list), 0
+    for r in rated:
+        if r["present"] is None or (r["present"] and r["acceptable"] is None):
+            unrated += 1
+            continue
+        entry = groups[r["group"]]
+        arm = entry["panels"][r["panel"]]
+        present_by_arm[arm].append(100.0 if r["present"] else 0.0)
+        by_prompt.setdefault(entry["prompt"], {})[arm] = 100.0 if r["present"] and r["acceptable"] else 0.0
+    per_arm = defaultdict(list)
+    for scores in by_prompt.values():
+        for arm, value in scores.items():
+            per_arm[arm].append(value)
+    return {"success_rate": {arm: sum(v) / len(v) for arm, v in per_arm.items()},
+            "object_present": {arm: sum(v) / len(v) for arm, v in present_by_arm.items()},
+            "n_prompts": len(by_prompt), "unrated": unrated,
+            "comparisons": {f"{a} - {b}": _paired_comparison(by_prompt, a, b) for a, b in FMAS_COMPARISONS},
             "note": "pilot only: author ratings and provisional calibration"}
 
 
