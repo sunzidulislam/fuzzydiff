@@ -47,7 +47,9 @@ def test_remaining_interface():
     c = ProvisionalCalibration(load_settings())
     assert c.size_quantiles({}) == (0.1, 0.2) and c.psi("mug", {}) == 1.0
     assert c.drift_thresholds("small") == (0.5, 0.5) and c.attention_ok("objects")
-    assert c.presence_logit(4, torch.tensor(2.0), torch.tensor(4.0)) == 3.0
+    raw = load_settings()
+    raw.provisional.pop("presence_models")
+    assert ProvisionalCalibration(raw).presence_logit(4, torch.tensor(2.0), torch.tensor(4.0)) == 3.0
     white = c.prototype("white")
     assert white.shape == (3,) and white[0] > 0.9 and white[1:].abs().max() < 0.01
     try:

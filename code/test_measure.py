@@ -18,6 +18,7 @@ from settings import load_settings  # noqa: E402
 
 DT = torch.float64
 S = load_settings()
+S.provisional.pop("presence_models")           # the fake logits below are on the raw scale
 
 
 class Prov(ProvisionalCalibration):

@@ -47,6 +47,14 @@ f6_e_max: 0.5
 f6_varpi_max: 0.5
 f6_zeta_max: 0.25
 f6_bound_kappa: 0.1
+# Measured by threshold_probe.py on 20 development images with assumed labels (Kaggle, 2026-11-07).
+# Raw SigLIP logits rated visible objects as absent. Share did not predict pointing accuracy on this
+# run, so this minimum only removes phrases with almost no text share.
+attention_m_min: 0.05
+presence_models:
+  2: {w_global: 1.622181, w_region: 1.779078, bias: 16.396018}
+  3: {w_global: 0.819644, w_region: 1.411103, bias: 11.395122}
+  4: {w_global: 0.721163, w_region: 1.385127, bias: 11.252459}
 g_min: 1.0e-12
 eps_g: 1.0e-8
 
