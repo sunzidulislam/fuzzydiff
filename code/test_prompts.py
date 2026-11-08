@@ -57,6 +57,20 @@ def test_suite_programs_have_expected_families():
     assert {"presence", "binding", "leakage"} <= {c.family for c in enumerate_suite("plain_color")[0].program.constraints}
 
 
+def test_size_prompts_only_ask_for_drawable_relations():
+    from prompts import size_class, vocab
+    v = vocab()
+    assert all(any(o in m for m in v["size_classes"].values()) for o in v["objects"] + v["test_only_objects"])
+    for suite in ("size", "ladder_size"):
+        for r in enumerate_suite(suite):
+            c = next(c for c in r.program.constraints if c.family == "F8")
+            gap = size_class(c.args[0]) - size_class(c.args[1])
+            assert abs(gap) <= 1 and (gap == 0 or (gap > 0) == (c.orientation > 0)), r.prompt
+    prompts = {r.prompt for r in enumerate_suite("ladder_size")}
+    assert "a pumpkin barely larger than a mug" in prompts and "a mug barely larger than a pumpkin" not in prompts
+    assert not any(p.startswith("a kitten") and p.endswith("than a tent") and "larger" in p for p in prompts)
+
+
 def test_m1_nouns_are_isolated():
     n = m1_nouns()
     others = suite_nouns("soft") | suite_nouns("mixture") | suite_nouns("size")

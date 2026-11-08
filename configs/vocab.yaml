@@ -13,7 +13,16 @@ contexts: ["", on a wooden table, on a wooden shelf, on a stone floor, in a gard
 mixture_terms: [greenish-gray, turquoise-green, coral-orange, bluish-purple, pinkish-white, reddish-brown,
                 yellowish-green, bluish-green, grayish-blue, orange-red, purple-pink, yellowish-orange]
 mixture_objects: 24   # first N objects
-comparatives: [larger, smaller]
+comparatives: [larger, bigger, smaller]
+# Typical real size of each object, for the size suites. A pair is used when both objects share a class,
+# or when they are one class apart and the comparative points the plausible way (a pumpkin larger than a
+# mug, never a mug larger than a pumpkin), so every hedge from barely to extremely can be drawn.
+size_classes:
+  small: [mug, teapot, vase, candle, bottle, bowl, plate, book, clock, hat, shoe, jar, apple, helmet, radio,
+          kettle, toaster, wallet, trumpet, lantern]
+  medium: [lamp, towel, kitten, pillow, backpack, umbrella, guitar, basket, cushion, puppy, rabbit, pumpkin,
+           cactus, drum, mirror, stool, suitcase]
+  large: [chair, bench, bicycle, sofa, blanket, tent, barrel]
 plain_colors: [red, blue, green, yellow, orange, purple, pink, white, black]
 plain_objects: [mug, teapot, vase, chair, lamp, book]
 m1_tune: [bakery, attic, cellar, chapel, lobby]

@@ -102,11 +102,29 @@ def _mixture():
         yield f"{_art(c1)} {c1} {o1} and {_art(c2)} {c2} {o2}", (o1, o2)
 
 
+SIZE_ORDER = ("small", "medium", "large")
+
+
+def size_class(obj: str) -> int:
+    """0 small, 1 medium, 2 large: the object's typical real size (configs/vocab.yaml size_classes)."""
+    return next(SIZE_ORDER.index(k) for k, members in vocab()["size_classes"].items() if obj in members)
+
+
+def plausible_size(o1: str, o2: str, comparative: str) -> bool:
+    """Same class, or one class apart with the comparative pointing the plausible way."""
+    gap = size_class(o1) - size_class(o2)
+    return gap == 0 or (abs(gap) == 1 and (gap > 0) == (comparative in ("larger", "bigger")))
+
+
+def _size_comparisons(objects, hedges):
+    for (o1, o2), h, c in itertools.product(itertools.permutations(objects, 2), hedges, vocab()["comparatives"]):
+        if plausible_size(o1, o2, c):
+            yield f"{_art(o1)} {o1} {h} {c} than {_art(o2)} {o2}", (o1, o2)
+
+
 def _size():
     v = vocab()
-    objects = v["objects"] + v["test_only_objects"]
-    for (o1, o2), h, c in itertools.product(itertools.permutations(objects, 2), v["hedges"], v["comparatives"]):
-        yield f"{_art(o1)} {o1} {h} {c} than {_art(o2)} {o2}", (o1, o2)
+    yield from _size_comparisons(v["objects"] + v["test_only_objects"], v["hedges"])
 
 
 def _plain():
@@ -144,9 +162,7 @@ def _ladder_mixture():
 
 
 def _ladder_size():
-    v = vocab()
-    for (o1, o2), h, c in itertools.product(itertools.permutations(v["objects"], 2), LADDER_HEDGES, v["comparatives"]):
-        yield f"{_art(o1)} {o1} {h} {c} than {_art(o2)} {o2}", (o1, o2)
+    yield from _size_comparisons(vocab()["objects"], LADDER_HEDGES)
 
 
 SUITES = {"soft": _soft, "mixture": _mixture, "size": _size, "plain_color": _plain,

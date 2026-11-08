@@ -31,7 +31,7 @@ def with_tmp(fn):
 
 
 def test_each_base_prompt_comes_at_every_hedge_in_order_and_bases_spread_over_words():
-    for suite, n_words in (("ladder_attribute", 7), ("ladder_mixture", 12), ("ladder_size", 2)):
+    for suite, n_words in (("ladder_attribute", 7), ("ladder_mixture", 12), ("ladder_size", 3)):
         rows = select_ladders(suite, "dev", 6)
         assert len(rows) == 30 and all(r.group == "dev" for r in rows)
         for i in range(0, 30, 5):
