@@ -592,15 +592,21 @@ def main():
     ap.add_argument("--tiny", action="store_true", help="smoke test on the tiny random model (CPU)")
     ap.add_argument("--only-prompt", action="append", help="run only this prompt from the suite; can be repeated")
     ap.add_argument("--only-setting", action="append", help="run only this tuning setting and unguided; can be repeated")
+    ap.add_argument("--prompts-file", default=None, help="JSON list of prompts (as screen.py writes) instead of a suite")
     ap.add_argument("--dmax", type=float, default=None, help="largest change to one latent value per step, for trying other limits")
+    ap.add_argument("--eta0", type=float, default=None, help="base guidance step size, for the sweep")
+    ap.add_argument("--sigma-hi", type=float, default=None, help="noise level where guidance starts (1.0 = from the first step), for the sweep")
     ap.add_argument("--steps", type=int, default=None, help="sampling steps of Stage 1 and unguided images, for comparing step counts")
     ap.add_argument("--limit", type=int, default=None, help="only the first N jobs")
     ap.add_argument("--calibration", default=None, help="fitted calibration file; provisional values if omitted")
     ap.add_argument("--manifest", default=None, help="frozen support manifest; required for --group test")
     ap.add_argument("--log-all-steps", action="store_true", help="log raw values at every step (calibration runs)")
     args = ap.parse_args()
+    if args.prompts_file:
+        with open(args.prompts_file) as f:
+            args.prompt = (args.prompt or []) + json.load(f)
     if bool(args.suite) == bool(args.prompt):
-        ap.error("give either --suite or --prompt")
+        ap.error("give either --suite or --prompt / --prompts-file")
     if args.prompt and args.arms == ap.get_default("arms"):
         args.arms = "unguided,stage1,stage1_sar"    # a placebo needs another image, so it is left out here
     for prompt in args.prompt or []:
@@ -643,7 +649,7 @@ def main():
         jobs = only_prompts(jobs, args.only_prompt)
     if args.only_setting:
         jobs = only_settings(jobs, args.only_setting)
-    jobs = with_overrides(jobs, dmax=args.dmax, steps=args.steps)
+    jobs = with_overrides(jobs, dmax=args.dmax, steps=args.steps, eta0=args.eta0, sigma_hi=args.sigma_hi)
     result = run_jobs(jobs[:args.limit], deps, args.out, resume_from=args.resume_from)
     n = merge_logs(args.out, Path(args.out) / "all.jsonl")
     print(json.dumps({"done": result.done, "skipped": result.skipped, "failed": result.failed,
