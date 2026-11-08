@@ -76,10 +76,11 @@ def ladder_images(run_dirs, arms=LADDER_ARM_NAMES):
 
 
 def _evidence(meta, c):
-    """FuzzyDiff's own degree score s of the final image, oriented so larger means more of the prompt's word."""
+    """FuzzyDiff's own degree score s of the final image. Its scorers already orient s (F2a returns 1 - s for
+    pale or muted, F8 multiplies the log ratio by o), so larger s means more of the prompt's word."""
     for f in meta.get("finals", []):
         if f["family"] == c.family and f["component"] == "main" and f["s"] is not None:
-            return c.orientation * f["s"]
+            return f["s"]
     return None
 
 

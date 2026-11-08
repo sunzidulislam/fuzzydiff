@@ -115,7 +115,7 @@ def _ladder_runs(tmp, arms=LADDER_ARM_NAMES, s_of=lambda arm, rank: rank / 4):
                 d.mkdir(parents=True)
                 grey = int(200 - 40 * rank) if arm.startswith("stage1") else 150
                 Image.new("RGB", (32, 32), (grey, grey, grey)).save(d / "image.png")
-                finals = [{"family": "F2a", "component": "main", "s": 1 - s_of(arm, rank)}]
+                finals = [{"family": "F2a", "component": "main", "s": s_of(arm, rank)}]
                 (d / "meta.json").write_text(json.dumps({"prompt": prompt, "arm": arm, "suite": "ladder_attribute",
                                                          "finals": finals}))
     return [tmp / "ladder_attribute"]
@@ -199,6 +199,26 @@ def test_evidence_row_correlates_fuzzydiffs_score_with_the_human_degree():
         e = score_ladder(tmp / "r.json", tmp / "ladder.key.json")["evidence_vs_human"]["attribute"]
         assert e["value"] > 0.9 and e["n"] == 5 * len(BASES) * len(LADDER_ARM_NAMES)
     with_tmp(body)
+
+
+def test_evidence_is_not_flipped_twice_for_words_that_point_down():
+    """The scorers already orient s (1 - s for dark, o * log ratio for smaller); _evidence must keep it."""
+    from constraints import Photometric
+    from ladder import _evidence
+    dark = translate("a very dark mug").constraints[0]
+    assert dark.orientation == -1
+
+    class Calib:
+        def phi(self, family, quantity, bin, raw):
+            return raw / 100                     # lightness L* in [0, 100] -> [0, 1]
+    scorer = Photometric()
+    scorer.raw = lambda c, evidence, component: evidence     # evidence here is the L* value itself
+    s_dark, s_light = scorer.score(dark, 20.0, Calib(), 4, "main"), scorer.score(dark, 80.0, Calib(), 4, "main")
+    assert s_dark > s_light
+    for s in (s_dark, s_light):
+        assert _evidence({"finals": [{"family": "F2a", "component": "main", "s": s}]}, dark) == s
+    small = translate("a mug very smaller than a bottle").constraints[0]
+    assert _evidence({"finals": [{"family": "F8", "component": "main", "s": 0.7}]}, small) == 0.7
 
 
 def test_table_rows_keep_sliders_and_spo_tbd_and_match_the_runner():
