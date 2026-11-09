@@ -100,7 +100,10 @@ def project_tier(g, higher: List[torch.Tensor]):
         candidates.append(v - (v @ a) / (a @ a) * a)
     if len(cols) == 2:
         A = torch.stack(cols, dim=1)
-        candidates.append(v - A @ (torch.linalg.pinv(A.T @ A) @ (A.T @ v)))
+        # the 2x2 pseudo-inverse runs on the CPU: on a nearly full GPU, cuSOLVER cannot create its handle
+        # (CUSOLVER_STATUS_INTERNAL_ERROR, Kaggle T4), which failed whole Stage-1 images
+        gram_inv = torch.linalg.pinv((A.T @ A).cpu()).to(A.device)
+        candidates.append(v - A @ (gram_inv @ (A.T @ v)))
     tol = 1e-9 * float(v.norm().clamp_min(1.0))
     feasible = [d for d in candidates if all(float(d @ a) >= -tol * float(a.norm()) for a in cols)]
     best = min(feasible, key=lambda d: float((v - d).norm()))
