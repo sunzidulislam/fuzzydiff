@@ -37,7 +37,7 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from calibration import ProvisionalCalibration  # noqa: E402
 from calibration_fit import FittedCalibration  # noqa: E402
-from constraints import FAMILY_SCORERS, new_state  # noqa: E402
+from constraints import DEGREE_FAMILIES, FAMILY_SCORERS, new_state  # noqa: E402
 from estimators import ClipSegSupport, FakeSigLIP, FakeSupport, SigLIPEvidence  # noqa: E402
 from grounding import missing_phrases, phrase_spans  # noqa: E402
 from guidance import BINS, GuideCfg, Stage1Out, run_stage1, score_image  # noqa: E402
@@ -120,6 +120,15 @@ class Summary:
     skipped: int = 0
     failed: int = 0
     failures: List[str] = field(default_factory=list)
+
+
+def manifest_no_degree(path) -> frozenset:
+    """Degree families the frozen support manifest does not mark "degree-guided" (absent counts as not)."""
+    if path is None:
+        return frozenset()
+    with open(path) as f:
+        status = json.load(f)["status"]
+    return frozenset(fam for fam in DEGREE_FAMILIES if status.get(fam, {}).get("status") != "degree-guided")
 
 
 def check_test_run(group, calibration_tag, manifest) -> None:
@@ -632,7 +641,8 @@ def main():
     cfg, sar = guide_cfg(s), sar_cfg(s)
     calib = FittedCalibration.load(args.calibration) if args.calibration else ProvisionalCalibration(s)
     check_test_run(args.group, calib.tag, args.manifest)
-    cfg = dataclasses.replace(cfg, log_all=args.log_all_steps)
+    cfg = dataclasses.replace(cfg, log_all=args.log_all_steps,
+                              state_kw={**cfg.state_kw, "no_degree": manifest_no_degree(args.manifest)})
     if args.tiny:
         backend = tiny_backend()
         cfg = dataclasses.replace(cfg, steps=2)

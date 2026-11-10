@@ -44,6 +44,22 @@ def test_point_and_one_sided_change_only_degree_targets():
         assert (f.low, f.high) == (g.low, g.high)
 
 
+def test_manifest_turns_off_degree_guidance_but_keeps_presence_and_the_score():
+    import json, tempfile
+    from run_experiment import manifest_no_degree
+    guided, = _frozen(LIGHT)
+    off, = _frozen(LIGHT, no_degree=frozenset({"F2a"}))
+    assert guided.weight > 0 and off.weight == 0 and off.gates["manifest"] is False
+    assert (off.low, off.high) == (guided.low, guided.high)          # still scored against the same target
+    assert _frozen(PRESENT, no_degree=frozenset({"F2a", "F8"}))[0].gates.get("manifest", True)
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "support_manifest.json")
+        with open(path, "w") as f:
+            json.dump({"status": {"F2a": {"status": "degree-guided"}, "F6": {"status": "presence/binding only"}}}, f)
+        assert manifest_no_degree(path) == {"F6", "F8"}                   # F8 has no decision: not guided
+    assert manifest_no_degree(None) == frozenset()
+
+
 def test_floored_log_loss_saturates_where_charbonnier_does_not():
     kappa = 0.1
     d = torch.tensor(6 * kappa, requires_grad=True)

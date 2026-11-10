@@ -65,6 +65,8 @@ class StepState:
     size_bounds: Dict[int, tuple] = field(default_factory=dict)
     target: str = "interval"                # ablations: "point" (interval center) or "one_sided" (mu >= l)
     loss: str = "charbonnier"
+    # degree families the frozen support manifest does not mark "degree-guided": scored, never guided
+    no_degree: frozenset = frozenset()
 
 
 def new_state(**kw) -> StepState:
@@ -341,6 +343,8 @@ def freeze_step(program, evidence, calib, bin, state: StepState, targets=None) -
             state.first_valid[c.family] = state.step
         for component in sc.components(c):
             gates = {"validity": valid, **sc.gates(c, evidence, calib, state, component)}
+            if c.family in DEGREE_FAMILIES and c.family in state.no_degree:
+                gates["manifest"] = False
             raw = sc.raw(c, evidence, component)
             lo, hi = sc.domain(c, calib, bin, component)
             gates["domain"] = _inside(raw, lo, hi)
