@@ -163,6 +163,18 @@ def test_ablation_table_arms_run_stage1_before_stage2():
     assert set(ABLATION_ARM_NAMES) == set(ABLATION_TABLE_ARMS)
 
 
+def test_exp3_rows_fill_our_three_methods_and_keep_the_rest_tbd():
+    from annotate import EXP3_ARMS, exp3_table_rows
+    assert EXP3_ARMS == ("unguided", "stage1", "stage1_sar")
+    human = {"missing": {"lenient": {"stage1": 10.0}, "strict": {"stage1": 20.0}},
+             "size_violation": {"stage1": 35.04}, "fidelity": {"stage1": 41.256}}
+    auto = {"text_image": {"stage1": 0.268}, "text_text": {"stage1": 0.731}, "clip_iqa": {"stage1": 0.8123}}
+    lines = exp3_table_rows(human, auto).splitlines()
+    assert lines[1] == "S1 & 10.0 / 20.0 & 35.0 & 41.26 & 0.27 / 0.73 & 0.812\\\\"
+    assert lines[0] == "SD3 & \\tbd & \\tbd & \\tbd & \\tbd & \\tbd\\\\"
+    assert lines[2].startswith("\\textbf{FuzzyDiff} & \\tbd") and all(l.count("&") == 5 for l in lines)
+
+
 def main():
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):

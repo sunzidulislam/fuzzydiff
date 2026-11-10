@@ -534,6 +534,29 @@ def ablation_table_rows(mixture=None, size=None) -> str:
     return "\n".join(lines)
 
 
+# Tab. fuzzy comparison (Exp. iii): our rows only; the baseline rows come from their own runs.
+EXP3_ROWS = (("unguided", "SD3"), ("stage1", "S1"), ("stage1_sar", "\\textbf{FuzzyDiff}"))
+EXP3_ARMS = tuple(a for a, _ in EXP3_ROWS)
+EXP3_COMPARISONS = (("stage1", "unguided"), ("stage1_sar", "stage1"), ("stage1_sar", "unguided"))
+
+
+def exp3_table_rows(human=None, auto=None) -> str:
+    """LaTeX rows of Tab. fuzzy comparison: missing objects (lenient / strict), size violated and Fidelity from
+    score_mixture(field="size"); text-image / text-text similarity and CLIP-IQA from auto_metrics.py."""
+    human, auto = human or {}, auto or {}
+    missing = human.get("missing", {})
+    lines = []
+    for arm, label in EXP3_ROWS:
+        lenient, strict = missing.get("lenient", {}).get(arm), missing.get("strict", {}).get(arm)
+        ti, tt = auto.get("text_image", {}).get(arm), auto.get("text_text", {}).get(arm)
+        cells = ["\\tbd" if lenient is None or strict is None else f"{lenient:.1f} / {strict:.1f}",
+                 _cell(human.get("size_violation", {}).get(arm)), _cell(human.get("fidelity", {}).get(arm), 2),
+                 "\\tbd" if ti is None or tt is None else f"{ti:.2f} / {tt:.2f}",
+                 _cell(auto.get("clip_iqa", {}).get(arm), 3)]
+        lines.append(f"{label} & " + " & ".join(cells) + "\\\\")
+    return "\n".join(lines)
+
+
 def score_m1(ratings: Path, key: Path, out_dir: Path, settings) -> dict:
     """M1 pass bar of the spec, from the run's metadata and the blind ratings.
 
