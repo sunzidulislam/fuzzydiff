@@ -452,3 +452,43 @@ Proposed next step, not started: the calibration-code fixes.
 | 26 | What is in the commit? | `size_check.py`, its test, notebook section 16; the revert removed exactly those |
 | 27 | Uncommit those changes. | Both commits removed locally and on GitHub (force push approved). Branch at `ea85bcf` |
 | 28 | How can I get fewer size violations? | Calibration: size targets, then presence for the noisiest bin. See 11d |
+
+## 12. Goal: size violation under 30% for the model
+
+Question asked: "for my model it needs to approximate less than 30. What needs to be improved?"
+
+**Under 30% means at most 2 violations in 10 prompts. Stage 1 has 6 (section 11b). At least 4 of the 6 must be fixed, and that needs both kinds of improvement; no single fix gets there.**
+
+### 12a. The arithmetic
+
+| Cause | Violations now | What fixes it |
+|---|---|---|
+| Object missing (toaster/radio, bowl/mug, kitten/mirror) | 3 | presence guidance in the first steps |
+| Scorer satisfied too early (kettle/shoe, drum/radio) | 2 | fitted size targets |
+| Target has no upper limit (blanket/drum) | 1 | fitted size targets |
+
+- Fixing all three size-target cases leaves 3 violations, which is 30%, not under it.
+- So at least one missing-object case must also be fixed.
+
+### 12b. What has to be improved
+
+1. **Size calibration (required).** Fit the hedge centres and the two size quantiles from annotated images, in place of the hand-set values. Every hedge then has a two-sided target, and guidance stops quitting at the lower edge. Best case, it removes 3 violations.
+2. **Presence in the noisiest bin (required).** Fit a presence model and validity flags for the first steps, so guidance can start at step 0, before SD3 has fixed which objects exist. This is the only route to the missing-object cases. One success here takes the rate from 30% to 20%.
+3. **Presence models for the later bins (supports 2).** The scorer now believes the radio and the mug are present when they are not, so it applies no pressure. Until that is fitted, step 2 cannot work reliably.
+
+All three are the calibration the paper already specifies, so they keep to the strict-methodology rule. They need a few hundred annotated calibration images, and the calibration-code fixes from the review first.
+
+### 12c. Cautions
+
+- **Under 30% cannot be promised.** Step 1 is likely to help. Step 2 is the uncertain one: adding a missing object from guidance alone is hard, and it has to succeed at least once in three.
+- **The 60% is a model rating on 10 prompts and one seed.** One borderline call moves it by 10 points. A blind hand rating may give a different starting number, so do that first.
+- **Do not reach the number by changing the test.** Picking easier prompts, loosening the rating rule after seeing the results, or tuning settings on these same 10 prompts would make the figure meaningless to a reviewer. Fix the setting and the calibration on other prompts, and fix the rating rule before rating.
+
+### 12d. Order of work
+
+1. Rate `exp3_v2/size.html` blind and run 15c, to get the real baseline.
+2. Fix the calibration code (the in-sample fit and the unenforced validity result).
+3. Annotate the calibration images and run the fit.
+4. Rerun Table 4 with the fitted calibration and guidance from the first step.
+
+Step 2 does not depend on the rating and can start at once. Not started.
