@@ -147,10 +147,14 @@ def main():
     ap.add_argument("--prompt", default="a slightly red mug next to a blue teapot")
     ap.add_argument("--word", default="mug")
     ap.add_argument("--dtype", default="float16", choices=["float16", "float32", "bfloat16"])
+    ap.add_argument("--identity-repeats", type=int, default=3,
+                    help="stock and custom gradient trials (at least 2); all comparisons are reported")
     ap.add_argument("--vae-device", default=None, help="measure memory with the VAE here, as the pipeline runs it")
     ap.add_argument("--vae-dtype", default="float16", choices=["float16", "float32"])
     ap.add_argument("--out", default=os.path.dirname(os.path.abspath(__file__)))
     args = ap.parse_args()
+    if args.identity_repeats < 2:
+        ap.error("--identity-repeats must be at least 2")
 
     res = {}
     torch.manual_seed(0)
@@ -220,17 +224,28 @@ def main():
     set_procs(tr, lambda i: JointAttnProcessor2_0())
     y0 = fwd(tr, x, ctx, pooled, t)
     g0, = torch.autograd.grad((y0.float() * w.float()).sum(), x)
-    y_again = fwd(tr, x, ctx, pooled, t)
-    g_again, = torch.autograd.grad((y_again.float() * w.float()).sum(), x)
-    # The same computation repeated: how much a gradient differs here with nothing changed.
-    res["identity_grad_noise_floor"] = rel(g_again.float(), g0.float())
-    del y_again, g_again
+    # Keep all repeat comparisons; the table reports the largest absolute error,
+    # rather than interpreting a single noisy GPU backward as a pass/fail verdict.
+    noise_samples = []
+    for _ in range(args.identity_repeats - 1):
+        y_again = fwd(tr, x, ctx, pooled, t)
+        g_again, = torch.autograd.grad((y_again.float() * w.float()).sum(), x)
+        noise_samples.append(rel(g_again.float(), g0.float()))
+        del y_again, g_again
+    res["identity_grad_noise_floor_samples"] = noise_samples
+    res["identity_grad_noise_floor"] = max(noise_samples, key=lambda z: z[0])
     set_procs(tr, lambda i: FuzzyJointAttnProcessor())
-    y1 = fwd(tr, x, ctx, pooled, t)
-    g1, = torch.autograd.grad((y1.float() * w.float()).sum(), x)
-    res["identity_out"] = rel(y1.float(), y0.float())
-    res["identity_grad"] = rel(g1.float(), g0.float())
-    del y0, y1, g0, g1
+    output_samples, grad_samples = [], []
+    for _ in range(args.identity_repeats):
+        y1 = fwd(tr, x, ctx, pooled, t)
+        g1, = torch.autograd.grad((y1.float() * w.float()).sum(), x)
+        output_samples.append(rel(y1.float(), y0.float()))
+        grad_samples.append(rel(g1.float(), g0.float()))
+        del y1, g1
+    res["identity_out"] = max(output_samples, key=lambda z: z[0])
+    res["identity_grad_samples"] = grad_samples
+    res["identity_grad"] = max(grad_samples, key=lambda z: z[0])
+    del y0, g0
 
     # ---- 2. reference checks at reduced resolution in float32 (float64 for tiny) ----
     rdt = torch.float64 if args.tiny else torch.float32
@@ -252,6 +267,7 @@ def main():
     fwd(tr_r, xr, ctx_r, pooled_r, t_r)
     mr = {f"{n}:{p}": v for n, pr in refs.items() for p, v in pr.maps.items()}
     sr = {f"{n}:{p}": v for n, pr in refs.items() for p, v in pr.shares.items()}
+    res["text_mass_diagnostics"] = {n: pr.text_mass_stats for n, pr in refs.items()}
     grf, = torch.autograd.grad(sum((v ** 2).sum() for v in mr.values()), xr)
     res["readout_val"] = max((rel(mo[k].detach(), mr[k].detach()) for k in mr), key=lambda z: z[0])
     res["share_val"] = max((rel(so[k].detach(), sr[k].detach()) for k in sr), key=lambda z: z[0])
@@ -263,15 +279,26 @@ def main():
 
     def scalar(xx):
         y = fwd(tr_r, xx, ctx_r, pooled_r, t_r)
-        return (y * wr).sum() + sum((pr.maps[args.word] ** 2).sum() + pr.text_mass.sum() for pr in procs_fd.values())
+        # Only differentiable terms: text_mass is a detached confidence statistic.
+        # Double accumulation reduces cancellation in the central differences;
+        # the transformer still runs in rdt, as recorded for the reference checks.
+        return (y * wr).sum(dtype=torch.float64) + sum(
+            (pr.maps[args.word] ** 2).sum(dtype=torch.float64) for pr in procs_fd.values())
 
     dvec = torch.randn_like(xr)
     gfd, = torch.autograd.grad(scalar(xr), xr)
-    eps = 1e-6 if rdt == torch.float64 else 1e-3
-    with torch.no_grad():
-        fdv = (scalar(xr + eps * dvec) - scalar(xr - eps * dvec)) / (2 * eps)
-    adv = (gfd * dvec).sum()
-    res["fd_grad"] = (abs(fdv - adv).item(), abs(fdv - adv).item() / max(abs(adv).item(), 1e-30))
+    eps = 1e-7 if rdt == torch.float64 else 1e-3
+    adv = (gfd * dvec).sum(dtype=torch.float64).item()
+    sweep = []
+    for step in (eps * 10, eps, eps / 10):
+        with torch.no_grad():
+            fdv = ((scalar(xr + step * dvec) - scalar(xr - step * dvec)) / (2 * step)).item()
+        error = abs(fdv - adv)
+        sweep.append({"epsilon": step, "finite_difference": fdv, "autograd": adv,
+                      "absolute_error": error, "relative_error": error / max(abs(adv), 1e-30)})
+    res["fd_grad_sweep"] = sweep
+    # A fixed, declared central step supplies the table; never select the best error.
+    res["fd_grad"] = (sweep[1]["absolute_error"], sweep[1]["relative_error"])
     with torch.no_grad():
         set_procs(tr_r, lambda i: FuzzyJointAttnProcessor(sar_log_r=torch.zeros(n_img_r, n_txt, dtype=rdt, device=dev)))
         res["sar_r1_out"] = rel(fwd(tr_r, xr, ctx_r, pooled_r, t_r), yr0)

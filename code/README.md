@@ -55,6 +55,26 @@ python -I verify_checkpoint.py --model stabilityai/stable-diffusion-3-medium-dif
 Needs a GPU with enough memory for one guided step at 1024^2 (gradient checkpointing is enabled)
 and access to the gated SD3 weights.
 
+The verifier uses three stock and three custom identity-gradient trials by default
+(`--identity-repeats`, minimum 2). The JSON preserves the individual comparisons;
+the table reports the largest absolute difference, alongside a separately recorded
+stock-repeat noise floor. This is a numerical diagnostic, not an automatic pass.
+
+`text_mass_diagnostics` records, per reference layer, the number of head/query rows
+with zero text mass, mass below the processor's `1e-30` denominator floor, or nonfinite
+mass. The materialized reference uses the same floor and detached confidence
+statistics as the processor. A finite share comparison therefore verifies this
+guarded convention, not a mathematically defined conditional share at zero mass.
+
+The full-model finite-difference objective contains only the transformer output and
+differentiable readout maps; detached text-mass statistics are excluded. Scalar sums
+accumulate in float64. `fd_grad_sweep` reports three perturbation sizes; `fd_grad`
+uses the fixed middle step (`1e-3` for float32, `1e-7` for the float64 tiny test),
+without selecting the best error. Inspect the sweep before interpreting the result.
+Run `python -I code/test_checkpoint_verification.py` from the repository root for
+the CPU regression checks. Corrected table values require rerunning verification;
+previous JSON files are not rewritten by these code changes.
+
 ## Pipeline
 
 * `settings.py` - typed settings: `configs/fuzzydiff_sd3.yaml`, with placeholders filled from `configs/provisional.yaml`.

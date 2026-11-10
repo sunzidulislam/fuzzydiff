@@ -72,6 +72,7 @@ class MaterializedReference:
         self.readout, self.readout_batch, self.log_r = readout, readout_batch, log_r
         self.sar_batch, self.mode, self.maps, self.shares = list(sar_batch), mode, {}, {}
         self.text_mass = None
+        self.text_mass_stats = None
         self.valid_text = valid_text
 
     def __call__(self, attn, hidden_states, encoder_hidden_states=None, attention_mask=None, *a, **k):
@@ -103,8 +104,17 @@ class MaterializedReference:
             for ph, idx in self.readout.items():
                 self.maps[ph] = A[b, :, :n_img, n_img + torch.tensor(idx)].mean(dim=(0, 2))
                 if self.valid_text is not None:
-                    mass = A[b, :, :n_img, n_img + torch.tensor(self.valid_text)].sum(-1)
-                    self.shares[ph] = (A[b, :, :n_img, n_img + torch.tensor(idx)].sum(-1) / mass).mean(0)
+                    # Match the processor's detached confidence statistics and its
+                    # denominator floor, including nonzero mass below 1e-30.
+                    mass = A[b, :, :n_img, n_img + torch.tensor(self.valid_text)].sum(-1).detach()
+                    self.text_mass_stats = {
+                        "head_query_rows": mass.numel(),
+                        "zero_rows": int((mass == 0).sum().item()),
+                        "floored_rows": int((mass < 1e-30).sum().item()),
+                        "nonfinite_rows": int((~torch.isfinite(mass)).sum().item()),
+                    }
+                    phrase_mass = A[b, :, :n_img, n_img + torch.tensor(idx)].detach().sum(-1)
+                    self.shares[ph] = (phrase_mass / mass.clamp_min(1e-30)).mean(0)
                     self.text_mass = mass.mean(0)
         out = (A @ v).transpose(1, 2).reshape(B, -1, attn.heads * hd)
         h, e = out[:, :hidden_states.shape[1]], out[:, hidden_states.shape[1]:]
@@ -185,7 +195,9 @@ def main(out_dir):
 
     def scalar(xx):
         y = run(model, xx, ctx, pooled, t)
-        return (y * w).sum() + sum((pr.maps["mug"] ** 2).sum() + pr.text_mass.sum() for pr in procs.values())
+        # Confidence statistics are detached and must not enter a finite-difference
+        # objective: their values change under perturbation but autograd omits them.
+        return (y * w).sum() + sum((pr.maps["mug"] ** 2).sum() for pr in procs.values())
 
     d = torch.randn_like(x)
     g, = torch.autograd.grad(scalar(x), x)
