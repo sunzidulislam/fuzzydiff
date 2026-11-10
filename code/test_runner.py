@@ -556,6 +556,28 @@ def test_size_scoring_counts_a_no_as_a_violation():
     with_tmp(body)
 
 
+def test_size_only_page_works_for_sd3_alone_and_counts_a_missing_object_as_violated():
+    from annotate import build_size_only_page, score_size_only
+    def body(tmp):
+        _fmas_run(tmp, SIZE_PROMPTS, arms=("unguided", "stage1"))
+        build_size_only_page(tmp, tmp / "size_only.html", seed=5)
+        page = (tmp / "size_only.html").read_text(encoding="utf-8")
+        assert "Are the suitcase and the mug both there?" in page and "Is the suitcase slightly larger than the mug?" in page
+        assert page.count('data-q="present"') == 2 * len(SIZE_PROMPTS) and "unguided" not in page
+        key = json.loads((tmp / "size_only.key.json").read_text())
+        answers = {SIZE_PROMPTS[0]: (True, True), SIZE_PROMPTS[1]: (False, None), SIZE_PROMPTS[2]: (True, False)}
+        rated = [{"group": g, "panel": p, "present": answers[e["prompt"]][0], "acceptable": answers[e["prompt"]][1]}
+                 for g, e in key.items() for p in e["panels"]]
+        (tmp / "ratings.json").write_text(json.dumps(rated))
+        r = score_size_only(tmp / "ratings.json", tmp / "size_only.key.json")
+        assert r["size_violation"] == {"unguided": 200 / 3} and r["object_missing"]["unguided"] == 100 / 3
+        assert r["unrated"] == 0 and r["comparisons"]["stage1 - unguided"]["n"] == 0
+        build_size_only_page(tmp, tmp / "both.html", seed=5, arms=("unguided", "stage1"))   # S1 added later
+        assert all(sorted(e["panels"].values()) == ["stage1", "unguided"]
+                   for e in json.loads((tmp / "both.key.json").read_text()).values())
+    with_tmp(body)
+
+
 def test_ablation_scores_compare_each_ablation_with_stage1_and_fill_the_table():
     def body(tmp):
         _fmas_run(tmp, MIX_PROMPTS, arms=ABLATION_ARM_NAMES)

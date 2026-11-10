@@ -563,6 +563,54 @@ def exp3_table_rows(human=None, auto=None, rows=EXP3_ROWS) -> str:
     return "\n".join(lines)
 
 
+# Size violated only (Tab. fuzzy comparison, one column): two questions per image. A missing object counts as
+# violated, as in score_mixture(field="size").
+SIZE_ONLY_PAGE = SUCCESS_PAGE.replace("<title>Success rating</title>", "<title>Size violation rating</title>").replace(
+    "<h1>Success rating</h1>", "<h1>Size violation rating</h1>").replace(
+    "For each image, answer both\nquestions. If the object is missing, you can skip the second one.",
+    "For each image, say whether both\nobjects are there. If they are, say whether the size relation holds as the "
+    "prompt words it, including how much\nlarger or smaller (\"slightly\", \"extremely\"). If an object is missing, "
+    "skip the second question.")
+
+
+def build_size_only_page(out_dir, out: Path, seed: int, arms=("unguided",)) -> None:
+    def controls(group, letter, prompt):
+        def question(name, text):
+            return (f'<p class="q">{html.escape(text)} '
+                    f'<label><input type="radio" data-q="{name}" name="{group}-{letter}-{name}" value="yes">Yes</label>'
+                    f'<label><input type="radio" data-q="{name}" name="{group}-{letter}-{name}" value="no">No</label></p>')
+        objects = " and the ".join(dict.fromkeys(translate(prompt).objects))
+        return question("present", f"Are the {objects} both there?") + question("acceptable", _size_question(prompt))
+    Path(out).write_text(SIZE_ONLY_PAGE % {"groups": _blind_groups(out_dir, out, seed, arms, "size_only", controls)},
+                         encoding="utf-8")
+
+
+def score_size_only(ratings: Path, key: Path, comparisons=EXP3_COMPARISONS) -> dict:
+    """Size violated in percent of images per arm (lower is better): an object missing, or the relation not as worded."""
+    with open(ratings) as f:
+        rated = json.load(f)
+    with open(key) as f:
+        groups = json.load(f)
+    by_prompt, missing, unrated = {}, defaultdict(list), 0
+    for r in rated:
+        if r["present"] is None or (r["present"] and r["acceptable"] is None):
+            unrated += 1
+            continue
+        entry = groups[r["group"]]
+        arm = entry["panels"][r["panel"]]
+        missing[arm].append(0.0 if r["present"] else 100.0)
+        by_prompt.setdefault(entry["prompt"], {})[arm] = 0.0 if r["present"] and r["acceptable"] else 100.0
+    per_arm = defaultdict(list)
+    for scores in by_prompt.values():
+        for arm, value in scores.items():
+            per_arm[arm].append(value)
+    return {"size_violation": {arm: sum(v) / len(v) for arm, v in per_arm.items()},
+            "object_missing": {arm: sum(v) / len(v) for arm, v in missing.items()},
+            "per_prompt": by_prompt, "n_prompts": len(by_prompt), "unrated": unrated,
+            "comparisons": {f"{a} - {b}": _paired_comparison(by_prompt, a, b, lower_is_better=True) for a, b in comparisons},
+            "note": "lower is better; pilot only: author ratings and provisional calibration"}
+
+
 def score_m1(ratings: Path, key: Path, out_dir: Path, settings) -> dict:
     """M1 pass bar of the spec, from the run's metadata and the blind ratings.
 
