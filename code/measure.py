@@ -38,7 +38,9 @@ class Measure:
     """Full evidence for one prompt: supports, presence, colour, size, and attention statistics."""
 
     def __init__(self, deps: EstimatorDeps, prompt: str, cond, ablation: str = ""):
-        """ablation "attention_only": supports are the phrase attention maps instead of CLIPSeg;
+        """ablation "attention_only": supports are the phrase attention maps instead of CLIPSeg, wherever a
+        backbone pass gives maps; a finished image has none (out is None) and is scored with CLIPSeg like
+        every other arm, so the arms' final scores are comparable;
         "overlap": binding is the plain overlap b(a, q) instead of the contrastive beta(a, q)."""
         if ablation and ablation not in MEASURE_ABLATIONS:
             raise ValueError(f"unknown measurement ablation {ablation!r}")
@@ -54,8 +56,8 @@ class Measure:
         objects = list(dict.fromkeys(program.objects))
         if objects:
             maps = None
-            if self.ablation == "attention_only":
-                maps = self._grounded(out) if out is not None and out.maps else {}
+            if self.ablation == "attention_only" and out is not None:
+                maps = self._grounded(out) if out.maps else {}
             self._objects(x, objects, ev, bin, maps)
         needs_colour = any(c.family in ("F6", "leakage") for c in program.constraints)
         lab = srgb_to_oklab(x) if needs_colour else None

@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ladder import measure_run  # noqa: E402
 from prompts import LADDER_HEDGES  # noqa: E402
 from run_experiment import image_id  # noqa: E402
-from screen import screen  # noqa: E402
+from screen import keep, screen  # noqa: E402
 from sweep import SETTINGS, summarize_sweep, sweep_flags, sweep_images, sweep_table  # noqa: E402
 
 
@@ -42,6 +42,11 @@ def test_screen_keeps_prompts_sd3_fails_worst_first():
         assert [r["prompt"] for r in rows] == ["a grey lamp and a teal bowl", "a pink cup and a green hat",
                                                "a red mug and a blue vase"]
         assert rows[0]["failing"] == ["F6/main mu=0.00"] and rows[2]["failing"] == []
+        # the cup prompt fails only because the hat is missing, so a colour ablation has nothing to fix there
+        assert [r["objects_present"] for r in rows] == [True, False, True]
+        assert keep(rows, 5) == ["a grey lamp and a teal bowl", "a pink cup and a green hat"]
+        assert keep(rows, 5, objects_present=True) == ["a grey lamp and a teal bowl"]
+        assert keep(rows, 1) == ["a grey lamp and a teal bowl"]
     with_tmp(body)
 
 

@@ -5,10 +5,15 @@ mu among the final records (degree families, presence, leakage) that run_experim
 meta.json. A prompt fails when that minimum is below the threshold. The failing prompts, worst first, are
 written as a JSON list that run_experiment.py --prompts-file reads.
 
-The selection uses the pipeline's own check, so say so when reporting: "prompts on which SD3's image
-violates at least one constraint by FuzzyDiff's scorer (mu < 0.5)". The ratings stay independent.
+With --objects-present a prompt is kept only when SD3 drew every object (all presence records pass) and
+another constraint fails. Without it the worst prompts are mostly those with an object missing, where a
+size or colour constraint is gated off and has nothing to act on.
 
-  python -I code/screen.py --run outputs/screen_mix --out outputs/screen_mix.json --keep 5
+The selection uses the pipeline's own check, so say so when reporting: "prompts on which SD3's image
+violates at least one constraint by FuzzyDiff's scorer (mu < 0.5)", and with --objects-present "and
+shows every object by the same scorer". The ratings stay independent.
+
+  python -I code/screen.py --run outputs/screen_mix --out outputs/screen_mix.json --keep 5 --objects-present
 """
 from __future__ import annotations
 
@@ -27,8 +32,15 @@ def screen(run_dir, threshold: float = 0.5, arm: str = "unguided"):
             continue
         low = [f for f in meta["finals"] if f["mu"] < threshold]
         rows.append({"prompt": meta["prompt"], "mu_min": min(f["mu"] for f in meta["finals"]),
-                     "failing": [f"{f['family']}/{f['component']} mu={f['mu']:.2f}" for f in low]})
+                     "failing": [f"{f['family']}/{f['component']} mu={f['mu']:.2f}" for f in low],
+                     "objects_present": all(f["family"] != "presence" for f in low)})
     return sorted(rows, key=lambda r: (r["mu_min"], r["prompt"]))
+
+
+def keep(rows, n: int, objects_present: bool = False):
+    """The n worst failing prompts; with objects_present, only those whose objects SD3 all drew."""
+    failing = [r for r in rows if r["failing"] and (r["objects_present"] or not objects_present)]
+    return [r["prompt"] for r in failing[:n]]
 
 
 def main():
@@ -37,14 +49,16 @@ def main():
     ap.add_argument("--out", required=True, help="JSON list of the kept prompts")
     ap.add_argument("--keep", type=int, default=5)
     ap.add_argument("--threshold", type=float, default=0.5)
+    ap.add_argument("--objects-present", action="store_true", help="keep only prompts where SD3 drew every object")
     args = ap.parse_args()
     rows = screen(args.run, args.threshold)
-    failing = [r for r in rows if r["failing"]]
-    kept = [r["prompt"] for r in failing[:args.keep]]
+    kept = keep(rows, args.keep, args.objects_present)
     Path(args.out).write_text(json.dumps(kept, indent=1))
     for r in rows:
-        print(f"{r['mu_min']:.2f}  {r['prompt']}  {'; '.join(r['failing'])}")
-    print(f"{len(failing)} of {len(rows)} prompts fail; kept {len(kept)} in {args.out}")
+        print(f"{r['mu_min']:.2f}  {'kept' if r['prompt'] in kept else '    '}  {r['prompt']}  {'; '.join(r['failing'])}")
+    failing = [r for r in rows if r["failing"]]
+    print(f"{len(failing)} of {len(rows)} prompts fail, {sum(r['objects_present'] for r in failing)} of them with"
+          f" every object present; kept {len(kept)} in {args.out}")
     if len(kept) < args.keep:
         print("fewer failing prompts than asked for: screen more candidates (--n) before running the ablation")
 

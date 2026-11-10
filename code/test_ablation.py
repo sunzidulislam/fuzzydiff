@@ -116,11 +116,19 @@ def test_attention_only_uses_phrase_maps_as_supports():
     ev = m(None, solid((.8, .1, .1), (.1, .2, .8)), SimpleNamespace(maps={"mug": {0: None}}), translate(prompt), 4)
     s = ev.objects["mug"]["S"]
     assert s.shape == (64, 64) and float((s * masks["mug"]).sum()) > 0.9 * float(s.sum())
-    est = EstimatorDeps(NoSeg(), est.siglip, MPROV, S)
     m = Measure(est, prompt, None, "attention_only")
-    m._grounded = lambda out: {}
+    ev = m(None, solid((.8, .1, .1), (.1, .2, .8)), SimpleNamespace(maps={}), translate(prompt), 4)
+    assert float(ev.objects["mug"]["S"].sum()) == 0          # a pass without maps: empty support, gate closes
+
+
+def test_attention_only_scores_a_finished_image_with_the_segmenter():
+    """A finished image has no backbone pass (out is None). Empty supports there gave every image of the
+    arm a size score of exactly 0 and presence 0, whatever it showed."""
+    prompt = "a red mug and a blue teapot"
+    est = EstimatorDeps(sar_tests.ScriptedSeg(), FakeSigLIP(lambda phrase, image: image.mean() * 0 + 3.0), MPROV, S)
+    m = Measure(est, prompt, None, "attention_only")
     ev = m(None, solid((.8, .1, .1), (.1, .2, .8)), None, translate(prompt), 4)
-    assert float(ev.objects["mug"]["S"].sum()) == 0
+    assert float(ev.objects["mug"]["S"].sum()) > 0 and float(ev.objects["teapot"]["S"].sum()) > 0
 
 
 def test_overlap_ablation_scores_binding_without_the_competitor():
