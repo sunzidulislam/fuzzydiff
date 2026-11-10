@@ -1,0 +1,333 @@
+# Session notes, 2026-11-10: why Stage 1 did not change the images
+
+Branch `fuzzysd3`. These notes record one working session: what was asked, what was found, what was
+changed, and what is still open. All runs used provisional calibration, so nothing here is paper evidence.
+
+## 1. Starting problem
+
+Experiment iii (notebook cell 15a, Table 4) gave nearly the same image for SD3, Stage 1 and Stage 1 + SAR
+on 10 size prompts ("a kettle extremely bigger than a shoe", ...).
+
+## 2. Diagnosis of the first run (`exp3`, default settings)
+
+Read from `all.jsonl`, the per-job `meta.json` files and the images.
+
+| Finding | Evidence |
+|---|---|
+| Guidance started too late | Only steps 14-24 of 28 were guided (sigma 0.74 to 0.28); `cfgSigmaHi` was 0.75 |
+| Each step was tiny | The peak limit (`cfgMaxPert` 0.2) held steps to 0.003-0.01 RMS; about 0.06 in total, against a latent RMS of about 1 |
+| Pixels barely changed | Stage 1 differed from SD3 by 2.5-6 of 255 per pixel on average; bench/pillow was identical |
+| Score moved without the picture | Bowl/mug: size score -0.01 to 0.56, membership 0.001 to 1.0, on a picture with no mug |
+| SD3 often omits the second object | Radio (2 prompts) and mug missing; vase and mirror barely visible. The size constraint was off on 40 of 110 guided steps |
+
+## 3. Experiments
+
+### 3a. Guidance from the first step, 0.05 RMS per step (cell 15d, first version)
+
+Result: flat, saturated shapes instead of photos. The latent was pushed by about 1.4 in total, more than
+its own size.
+
+### 3b. One prompt, four settings (cell 15d.0, `exp3_one`)
+
+Prompt: "a kettle extremely bigger than a shoe". Size score = log(area ratio); target 0.95 to 1.90; SD3
+scores 0.44.
+
+| Setting | Guidance starts | Latent moved (total RMS) | Size score | Pixel change vs SD3 (0-255) | Image |
+|---|---|---|---|---|---|
+| `rms0.01` | first step | 0.24 | 0.93 | 53 | Kettle bigger, shoe smaller, but wall blown out to white, objects flattened |
+| `rms0.02` | first step | 0.34 | 1.01 | 84 | Layout wrecked: tall boot larger than a small kettle |
+| `rms0.02_hi0.9` | sigma 0.9 (step 7) | 0.30 | 0.87 | 16 | Normal photo; kettle somewhat bigger, shoe somewhat smaller |
+| `rms0.03` | first step | 0.45 | 0.12 | 95 | Flat black-and-white graphic |
+
+Conclusions:
+
+- The damage comes from the first steps, not from the total push. At steps 0-1 the clean prediction is a
+  blur, the objects are not found (areas 0.002), presence reads about -30 to -39, and the push follows
+  the presence loss alone (loss 71).
+- Starting at sigma 0.9 with 0.02 RMS per step is the one setting that kept the photo and moved the size
+  relation the right way. The change is modest and stops short of the target.
+- A score inside the target does not mean a good image (`rms0.02`). The sheet has to be looked at.
+- One prompt with one seed shows the method can change the picture, not that it does so reliably.
+
+### 3c. Ten prompts with the candidate setting (cell 15d, current version)
+
+*Superseded: see section 10.*
+
+Running on Kaggle at the time of writing. Settings: `--sigma-hi 0.9 --clip rms --dmax 0.02 --eta0 0.04`
+and a stronger `--dmax 0.03 --eta0 0.06`. Output: `exp3_layout.zip`. Not yet analysed.
+
+## 4. Changes made in this session
+
+| Commit | What |
+|---|---|
+| `d627b60` | `code/layout_check.py` and `code/test_layout_check.py`: per setting, how far the latent moved, the size score, the pixel change to SD3, the share of saturated pixels, a first-reading verdict, `steps.csv` and a comparison sheet. Notebook cell 15d.0 (one prompt, four settings). 15d changed to 0.01 and 0.02 RMS per step |
+| `8b47c3b` | 15d changed to the setting that worked on one prompt (from sigma 0.9) and a stronger one |
+
+Not changed: the method code (`guidance.py`, `constraints.py`, `measure.py`, `calibration.py`, `sar.py`).
+The decision was to follow the methodology of the paper strictly and vary only the settings it leaves
+open.
+
+Tests run on this machine (no torch, no GPU): `test_layout_check.py`, `test_reporting.py`,
+`test_prompts.py`, `test_predicates.py` pass. The guidance, estimator and backend tests were not run here.
+
+Git setup of this clone:
+
+- `origin`: original URL, signs in with the saved `sunzidiautomation` credential, which GitHub refused
+  write access to (403).
+- `new-origin`: same repository, signs in as `sunzidulislam`. Pushes go here:
+  `git push new-origin fuzzysd3`.
+- The branch still tracks `origin`. The repo-local commit identity was set to `sunzidulislam`; commit
+  `d627b60` was made before that and is authored as `sunzidiautomation`.
+
+## 5. Code checked against the method (section E, guided sampling)
+
+The per-step loop matches the method steps: clean prediction, frozen constraint set, Charbonnier losses per
+tier, one backward pass per tier, cone projection, RMS-normalised step with a uniform limit, acceptance
+(domain first, then tier-1/2 tolerances and total loss), at most two halvings, Euler update, attention
+prior from the accepted latent, size-regime order.
+
+Where the runs depart from the method (calibration, not the loop):
+
+1. Validity flags are not fitted. Provisional calibration marks every family valid in every noise bin, so
+   `--sigma-hi` is a manual substitute for the missing flags.
+2. No presence model for the noisiest bin (sigma above 0.75); bin 1 silently uses bin 2's
+   (`calibration.py:105`). The candidate setting guides seven steps in that bin.
+3. Which quantity the step limit s_t bounds is not settled: the default bounds the largest single latent
+   value, the setting that worked bounds the RMS. The manuscript's step equation is needed.
+4. Size quantiles (`c68` 0.1, `c95` 0.2) and hedge centers are placeholders. With them, "barely" is
+   unmeasurable (never guided) and "slightly"/"somewhat" are direction-only (any ratio above about 1.22
+   satisfies them), so 4 of the 10 size prompts cannot show graded control.
+5. The same hedge can be scored against two targets, depending on whether both objects ever passed their
+   gates (pumpkin/vase against ">= 0.2", toaster/radio against 0.15-0.30).
+6. `sigma_hi` and the negative prompt are in the code but not in the method summary.
+7. The size regime is fixed at the first step where both objects pass their gates, not strictly at t0.
+8. The size score is the mean of a soft segmentation map (`estimators.py:90`), so it can change when the
+   mask's confidence changes without the object changing size.
+
+## 6. Code review of the whole branch
+
+Two reviewers read the tree at `8b47c3b`; nothing was run, and the individual findings were not all
+re-verified.
+
+### Standards (against `code/README.md` and the notebook's rules)
+
+- "configs/ is the single source of all settings": `BINS = 4` hardcoded in `guidance.py:22` and
+  `sar.py:26`; `sar.py:177` runs the fallback check with default gate values while
+  `run_experiment.py:290` passes the configured ones; `sar.py:206` and `negative.py:15` duplicate
+  settings; several tuned constants live in code.
+- "All logic lives in code/": notebook cell 64 (15d) builds sheets inline, repeating
+  `layout_check.py`; cell 28 re-implements `image_id`.
+- "reporting.py refuses provisional records": `annotate.py:518`, `annotate.py:549` and `ladder.py:326`
+  produce LaTeX rows without that check.
+- README module list omits eight modules.
+- Smells: duplicated code (`annotate.py:306-321`, `guidance.py:292-312`, two `read_jsonl`), arms as
+  bare strings across seven tables, single-letter evidence keys, a 17-parameter `_log_step`, unused
+  generality, `annotate.py` and `guided_step` doing several jobs.
+
+### Spec (against the method steps A-G)
+
+Missing or partial:
+
+- Gradient-validity result is never enforced: the manifest is only checked for existence and `valid()`
+  ignores it, so a failing family would still be guided.
+- No one-step-lag SAR arm, no harm-rate metric, size regime never logged.
+- No per-stratum coverage report, no admissible-domain table builder.
+- SAR confidence weighting and softmax competition are coded but never switched on.
+- Attention thresholds are produced for objects only, with one configuration.
+- Relation types are not parsed; every pair defaults to exclusive.
+- Annotations come from final images only and are joined to every noise bin.
+- Fitting rejects only the test split; nothing ties a fit to G_cal or G_cons.
+- Several calibration inputs have no builder.
+
+Looks wrong:
+
+- The widening factor gamma is scored on the training folds, not the held-out fold
+  (`calibration_fit.py:214-218`).
+- kappa_eff is baked in from a hand-supplied `sigma_m`, and size adds `c68` again
+  (`constraints.py:305`).
+- Fitted plateaus are dropped (`fit_calibration.py:172`).
+- Mixtures, leakage and prototypes use OKLab; the method says CIELAB.
+- Size quantiles are fitted in-sample and pooled over bins.
+- Stage-2 validity is not made contiguous.
+- SAR drift thresholds use the current support's size stratum, enabling uses the reference's.
+
+Not asked for: SAR rollback and the final fallback check, a sixth prompt group `sys`, the placebo,
+no-check, negative-prompt and prompt-weight arms, the sweep overrides.
+
+Confirmed matching: SAR step order, reuse of the unconditional output, re-noising, permanent disable and
+suspension; the 4-of-5 fold rule; statistics on raw maps; size-regime order.
+
+## 7. What to do next
+
+*Superseded: see section 10.*
+
+1. Let 15d finish and analyse `exp3_layout.zip`: on how many of the 10 prompts does the photo survive
+   and the size relation move?
+2. Get the manuscript's guided-step equation to settle peak versus RMS for the step limit.
+3. If 15d holds: rerun 15a with that setting for all three rows and rate the images blind (`size.html`).
+4. If it does not: the next step is the calibration work, not more tuning.
+5. Before anything goes into the paper: annotations and fitted calibration (method sections B and D),
+   more prompts and seeds, on test prompts that were not used to choose the setting. Fix first:
+   enforcement of the gradient-validity result, the in-sample gamma fit, OKLab versus CIELAB, the dropped
+   plateaus.
+
+## 8. Suggestions for later
+
+Ordered by what they unblock.
+
+**Decide whether the method is promising (cheap, do first)**
+
+- Judge 15d by looking at the sheets, not the scores. Count the prompts where the image is still a photo
+  and the size relation visibly moved toward the prompt.
+- If only the stronger setting moves the size and it also damages images, try values between the two
+  (for example 0.025 from sigma 0.9) on one prompt with cell 15d.0 before another 10-prompt run.
+- Run two or three seeds on the prompts that worked. One seed cannot show reliability.
+- Use prompts whose hedge has a graded target with the current values ("moderately", "considerably",
+  "nearly", "extremely"). "barely", "slightly" and "somewhat" cannot show graded control until the size
+  quantiles are fitted.
+- Keep the SD3-with-negative-prompt control (`unguided_neg`) whenever a negative-prompt arm is reported,
+  and say in the paper that only our rows use a negative prompt.
+
+**Make the runs follow the method (needs data, not tuning)**
+
+- Do the annotation and calibration steps (method sections B and D). Every run so far uses placeholders
+  for presence, validity flags, size quantiles and hedge intervals.
+- Fit a presence model and validity flags for the noisiest bin (sigma above 0.75). Without them, guiding
+  from sigma 0.9 is outside what the method allows, and `--sigma-hi` stays a hand-set stand-in.
+- Settle from the manuscript whether the step limit bounds the largest latent value or the RMS, then make
+  that the default and remove the other option.
+- Decide whether `sigma_hi` and the negative prompt belong in the paper. If they stay in the code, the
+  manuscript has to describe them.
+
+**Fix before any number goes into the paper (calibration and SAR code)**
+
+- Enforce the gradient-validity result: a family that fails must get no degree guidance.
+- Fit the widening factor gamma on the held-out fold.
+- Use CIELAB for mixtures, leakage and prototypes, or change the manuscript to say OKLab.
+- Keep the fitted plateaus instead of dropping them.
+- Fit size quantiles out of fold and per bin; avoid adding `c68` twice in kappa_eff.
+- Make Stage-2 validity contiguous.
+- Log the size regime per prompt (needed for the "size-regime shares" the method asks to report).
+- Add the one-step-lag SAR arm and the harm-rate metric.
+- Score the same hedge against one target, whether or not both objects passed their gates.
+
+**Measurement limit to state in the paper**
+
+- The size score comes from a soft segmentation mask and can move without the object changing size.
+  Report human ratings for size, and treat the automatic score as supporting data only.
+
+**Housekeeping (no effect on results)**
+
+- Read `BINS` and the step count from the config instead of hardcoding them; make the SAR fallback check
+  use the configured gate values.
+- Move the 15d sheet code from the notebook into `layout_check.py`.
+- Add the missing modules to `code/README.md`.
+- Point the `fuzzysd3` branch at `new-origin`, or give `sunzidiautomation` write access, so a plain
+  `git push` works.
+
+## 9. Questions asked in this session, with the short answers
+
+| # | Question | Short answer |
+|---|---|---|
+| 1 | All images look the same; why is my method not working? Fix it. | Guidance started at sigma 0.75 and moved the latent about 0.06 in total. The `exp3` run used the default settings, not the opt-in fix. See section 2 |
+| 2 | Do not change the method; follow the methodology of the paper strictly. | Agreed. Only the settings the paper leaves open were varied; the method code is untouched |
+| 3 | I got these images for Stage 1 (flat orange and grey shapes). | Opposite failure: 0.05 RMS per step from the first step is far too strong. They came from `rms0.05` |
+| 4 | Fix all problems; I want to see the data for one prompt first, whether it works. | Added cell 15d.0 and `layout_check.py`. See section 3b |
+| 5 | Create a new origin for the `sunzidulislam` account; name it `new-origin`, keep the other as `origin`. | Done. See section 4 |
+| 6 | (One-prompt results, `exp3_one`.) | One of four settings works: from sigma 0.9 at 0.02 RMS per step. The first steps do the damage |
+| 7 | Can one prompt produce sufficient results? | No. It is one sample on the easiest case, tuned on that same prompt, and it fell short of the target |
+| 8 | If I run 15d, what happens? | SD3 plus Stage 1 under two settings on 10 prompts, about 60 minutes per setting, one three-panel sheet per prompt, zipped as `exp3_layout.zip`. Stage 1 only, no rating |
+| 9 | It is running; is the internal code okay? | The settings are applied as intended and the logged numbers are consistent. Not verified here: the torch tests and SAR |
+| 10 | Check the code against the paper. | No bug in the guided step. The paper was not in the repo; four issues found from code and logs. See section 5 |
+| 11 | (Method steps A-G pasted.) | Section E matches the code. The gap is sections B and D: no annotations and no fitted calibration |
+| 12 | Code review of all commits. | See section 6 |
+| 13 | What do I need to do now? | Wait for 15d and send `exp3_layout.zip`; send the guided-step equation. See section 7 |
+| 14 | Write this file, with the suggestions and the questions. | This file |
+
+## 10. Update: the 10-prompt result, the Table 2 rerun, and the steps to run
+
+This section is later than sections 3c and 7 and replaces their "not yet received" and "what to do next" parts.
+
+### 10a. Ten prompts with the candidate setting (cell 15d, `exp3_layout`)
+
+Setting: `--sigma-hi 0.9 --clip rms --dmax 0.02 --eta0 0.04` (`rms0.02_hi0.9`), compared with SD3 on the same seed.
+
+**Result: the setting changes the picture without breaking it, but the real gain over SD3 is modest: clearly better on about 3 of 10 prompts, the same on the rest. Nothing got worse.**
+
+| Prompt | What changed | Better than SD3? |
+|---|---|---|
+| a pumpkin slightly bigger than a vase | a vase now stands behind the pumpkin; SD3 had only a tiny one in the background | yes |
+| a puppy considerably smaller than a stool | stool larger and fully in view, puppy slimmer | yes |
+| a kettle extremely bigger than a shoe | shoe is shorter; kettle about the same | slightly, not "extremely" |
+| a bench moderately larger than a puppy | bench a little more prominent | marginal |
+| a blanket somewhat bigger than a drum | drum redrawn, relation was already right | same |
+| a kitten nearly larger than a mirror | small layout shift | same |
+| a bowl moderately larger than a mug | still one bowl-mug hybrid, no second object | same |
+| a toaster slightly bigger than a radio | still no radio | same |
+| a drum extremely bigger than a radio | still no radio | same |
+| a bench barely bigger than a pillow | pixel-identical; no step accepted, the target was already met | same |
+
+Per image at this setting: 0 to 17 of 18 guided steps accepted, latent moved 0.00 to 0.28 (summed RMS), mean pixel change against SD3 0 to 22 of 255, saturated share at most 0.07.
+
+What the numbers hide:
+
+- **The method's own score overstates the gain.** It says 10 of 10 guided images meet the size target against 4 of 10 for SD3. It counts the toaster and the bowl/mug images as satisfied (second object "present" with membership 1.0), and neither picture shows a second object. These scores are not evidence for the paper; the blind rating has to carry the claim.
+- **One prompt is scored against two targets.** For "a toaster slightly bigger than a radio" the SD3 image is judged against 0.15 to 0.30 and the guided image against "above 0.20" (the size regime resolved differently in the two runs), so the guided image passes at 3.92 where SD3 fails at 1.82.
+- **Stage 1 cannot add an object SD3 left out** at this strength (toaster/radio, drum/radio, bowl/mug). This is where the missing presence model for the noisiest bin matters.
+
+The stronger setting `rms0.03_hi0.9` (`--dmax 0.03 --eta0 0.06`) was no better on size and added artifacts: coloured patches on both drum images, distorted legs on both puppies, and the kitten prompt dropped to membership 0.39. It is dropped.
+
+### 10b. Table 2 rerun that could not be used (`ablation_mix2`, `ablation_size2`)
+
+Cell 14d had been run at commit `49be347`, before the fixes, with `CHOSEN = 'current'` (every `meta.json` has `overrides: {}`), which is the provisional setting: guidance from sigma 0.75 with the peak step limit.
+
+- **All 14 arms gave the same picture on all 10 prompts.** Stage 1 and its eight ablations moved the latent 0.02 to 0.08 per size prompt (up to 0.15 for colour) and changed the image by 1.5 to 7.6 of 255 on average. The one-prompt test needed about 0.30 before the picture changed.
+- **Stage 2 arms:** 7 to 15 of 255 pixel change, which is re-rendered texture from the img2img pass. SAR, placebo priors and no-consistency-check gave the same scores to two decimals on almost every prompt, so the SAR bias had no measurable effect. In 3 of 10 prompts the SAR output was discarded and the Stage 1 image returned (reason "attribute").
+- **`abl_floored`** accepted 0 of 11 steps on three size prompts and returned the SD3 image.
+- **`abl_attention_only`** scored exactly 0.00 with presence 0.00 on every image. Cause: the arm guided normally, but scoring the finished image has no attention maps, so its supports were empty.
+- **The screened size prompts were the wrong kind of failure.** All five had an object the scorer judged absent (toaster only, vase only, a man with a drum, two suitcases, a clock-shaped pillow). A missing object gates the size constraint off, so there was nothing for an ablation to change. Of the colour prompts, two of five had both objects and a failing colour constraint.
+
+These pages must not be rated.
+
+### 10c. Fixes made after that
+
+| Commit | Change |
+|---|---|
+| `8ab2cce` | `code/screen.py`: new `--objects-present` flag, keeps only prompts where SD3 drew every object and another constraint fails (function `keep`). `code/measure.py`: the attention-only arm scores a finished image with CLIPSeg like every other arm. Notebook 14a screens with the new flag; 14d passes the fixed setting (size: `--sigma-hi 0.9 --clip rms --dmax 0.02 --eta0 0.04`; colour: `--clip rms --dmax 0.02 --eta0 0.04`, start stays at 0.75) and writes to `ablation_mix3` / `ablation_size3`; 14e reads from them. |
+| `2dfa94d` | Notebook 15a, 15b, 15c: Table 4 runs with the same size setting and writes to `exp3_v2` (the old `exp3` would have been resumed and kept its identical images). |
+
+Both are pushed to `new-origin` (`fuzzysd3`).
+
+Not verified: the screening rule is tested on this machine, but the `measure.py` fix and its new test (`test_attention_only_scores_a_finished_image_with_the_segmenter`) could not run here (no torch). The colour setting in 14d is untested. With the new rule, 14a may keep fewer than 5 size prompts.
+
+### 10d. Steps to run on Kaggle
+
+1. **Stop** the 15d cell if it is still running.
+2. **Import the new notebook**: File -> Import Notebook -> GitHub, repo `sunzidulislam/fuzzydiff`, branch `fuzzysd3`, file `notebooks/fuzzydiff_kaggle.ipynb`. GPU T4 x2. Pulling the code alone is not enough, the cells changed.
+3. **Run the setup cells.** The clone cell's last line should print `2dfa94d`.
+4. **Run the two tests** in a new cell: `!python -I code/test_ablation.py && python -I code/test_sweep.py`. Every line should start with `ok`.
+5. **Run 15a** (Table 4), about 2 to 3 hours; a rerun resumes.
+6. **Run 15b** (automatic columns).
+7. **Rate** `exp3_v2/size.html` from `exp3_v2.zip`. Do not open `size.key.json` first. Press "Show ratings" and copy the text.
+8. **Run 15c** with the text pasted in place of `PASTE HERE`. It prints the Table 4 rows.
+9. **Run 14a** (scree ning), about 1 hour. If it keeps fewer than 5 size prompts, stop and look at the output.
+10. **Run 14d** (Table 2), several hours per experiment; a rerun resumes. Download `ablation3.zip`.
+11. **Rate** `ablation_mix3/ablation_mix3.html` and `ablation_size3/ablation_size3.html`.
+12. **Run 14e** with the two rating texts pasted into `MIX_RATINGS` and `SIZE_RATINGS`. It prints the Table 2 rows.
+
+Notes: Table 4 comes first because it answers the main question (better than SD3 or not) and is the shorter run. Do not run 15e/15f: they add a negative prompt, which is not in the paper's method. Download each zip before the session ends.
+
+### 10e. What to expect
+
+Nothing so far shows a large advantage over SD3. Expect the blind rating to show a small one. If it does not, a stronger setting will not help (0.03 already adds artifacts); the next step is the calibration the method specifies, starting with a presence model and validity flags for the noisiest bin (section 8).
+
+### 10f. Questions asked after section 9
+
+| # | Question | Short answer |
+|---|---|---|
+| 15 | Read `results (3)` for Table 2. | Unusable: old code, provisional setting, all 14 arms identical. See 10b |
+| 16 | Fix the issues, and what do I run to get better images than SD3? | Three fixes (10c). No guarantee of "better" yet |
+| 17 | Is the partly finished 15d folder enough for testing? | Yes, the 0.02 setting was complete |
+| 18 | Check `results (5).zip`. | About 3 of 10 prompts clearly better, none worse. See 10a |
+| 19 | (15d printout pasted.) | Same data; it is the method's own scorer and overstates the gain |
+| 20 | Step-by-step, what do I do? | See 10d |
