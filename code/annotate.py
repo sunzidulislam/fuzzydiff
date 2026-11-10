@@ -538,15 +538,21 @@ def ablation_table_rows(mixture=None, size=None) -> str:
 EXP3_ROWS = (("unguided", "SD3"), ("stage1", "S1"), ("stage1_sar", "\\textbf{FuzzyDiff}"))
 EXP3_ARMS = tuple(a for a, _ in EXP3_ROWS)
 EXP3_COMPARISONS = (("stage1", "unguided"), ("stage1_sar", "stage1"), ("stage1_sar", "unguided"))
+# With the derived negative prompt (negative.py); SD3 + the same negative prompt is the control row.
+EXP3_NEG_ROWS = (("unguided", "SD3"), ("unguided_neg", "SD3 + negative prompt"), ("stage1_neg", "S1"),
+                 ("stage1_sar_neg", "\\textbf{FuzzyDiff}"))
+EXP3_NEG_ARMS = tuple(a for a, _ in EXP3_NEG_ROWS)
+EXP3_NEG_COMPARISONS = (("unguided_neg", "unguided"), ("stage1_neg", "unguided_neg"), ("stage1_sar_neg", "stage1_neg"),
+                        ("stage1_sar_neg", "unguided_neg"))
 
 
-def exp3_table_rows(human=None, auto=None) -> str:
+def exp3_table_rows(human=None, auto=None, rows=EXP3_ROWS) -> str:
     """LaTeX rows of Tab. fuzzy comparison: missing objects (lenient / strict), size violated and Fidelity from
     score_mixture(field="size"); text-image / text-text similarity and CLIP-IQA from auto_metrics.py."""
     human, auto = human or {}, auto or {}
     missing = human.get("missing", {})
     lines = []
-    for arm, label in EXP3_ROWS:
+    for arm, label in rows:
         lenient, strict = missing.get("lenient", {}).get(arm), missing.get("strict", {}).get(arm)
         ti, tt = auto.get("text_image", {}).get(arm), auto.get("text_text", {}).get(arm)
         cells = ["\\tbd" if lenient is None or strict is None else f"{lenient:.1f} / {strict:.1f}",

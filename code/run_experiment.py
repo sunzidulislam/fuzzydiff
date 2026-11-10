@@ -42,6 +42,7 @@ from estimators import ClipSegSupport, FakeSigLIP, FakeSupport, SigLIPEvidence  
 from grounding import missing_phrases, phrase_spans  # noqa: E402
 from guidance import BINS, GuideCfg, Stage1Out, run_stage1, score_image  # noqa: E402
 from measure import EstimatorDeps, Measure, measure_scene  # noqa: E402
+from negative import negative_prompt  # noqa: E402
 from predicates import Constraint, Program, translate  # noqa: E402
 from prompts import PromptRow, base_prompt, degree_word, enumerate_suite, hedge_of, select, select_ladders  # noqa: E402
 from reporting import LeakageError, StepLog  # noqa: E402
@@ -51,8 +52,14 @@ from settings import load_settings  # noqa: E402
 
 COMMANDED = {"darker": -1, "brighter": +1}
 TARGET_BAND = 0.02
-UNGUIDED_ARMS = {"unguided", "ladder_unguided", "prompt_weight"}
-STAGE2_MODES = {"stage1_plain": "plain", "stage1_sar": "sar", "stage1_placebo": "sar", "stage1_sar_nocheck": "sar"}
+UNGUIDED_ARMS = {"unguided", "ladder_unguided", "prompt_weight", "unguided_neg"}
+STAGE2_MODES = {"stage1_plain": "plain", "stage1_sar": "sar", "stage1_placebo": "sar", "stage1_sar_nocheck": "sar",
+                "stage1_sar_neg": "sar"}
+# Arms with the negative prompt derived from the program (negative.py). unguided_neg is the control:
+# SD3 with the same negative prompt, so a gain of the method is not the negative prompt alone.
+NEGATIVE_ARMS = {"unguided_neg", "stage1_neg", "stage1_sar_neg"}
+STAGE1_OF = {"stage1_sar_neg": "stage1_neg"}        # Stage 2 arms start from this Stage 1 arm (default stage1)
+STAGE1_ARMS = {"stage1", "stage1_neg"}
 COMPARISON_ARMS = ("stage1", "stage1_plain", "stage1_sar", "stage1_placebo")
 # Tab. ablation: each Stage-1 arm changes one component. Values are GuideCfg fields, StepState fields
 # (state_kw), or the Measure ablation. "w/o gradient-validity gate" and "w/o noise-bin validity gates" have
@@ -206,9 +213,15 @@ def _final_records(job, finals, base_finals, log):
                   raw=f.get("raw"), quantity=f.get("quantity"))
 
 
+def _negative(job: Job, deps: Deps) -> str:
+    if job.arm not in NEGATIVE_ARMS:
+        return ""
+    return negative_prompt(job.program, deps.settings.get("hedge_centers", dict), deps.settings.get("default_center"))
+
+
 def _cond(job: Job, deps: Deps):
     spans = phrase_spans(job.prompt, job.program) if deps.measure_factory else None
-    return deps.backend.encode_prompt(job.prompt, spans)
+    return deps.backend.encode_prompt(job.prompt, spans, _negative(job, deps))
 
 
 def _prompt_weighted(cond, prompt):
@@ -226,8 +239,8 @@ def _save_stage1(result, tmp):
                 "presence": result.presence}, tmp / "stage1.pt")
 
 
-def _load_stage1(out: Path, prompt: str, seed: int, backend) -> Stage1Out:
-    path = out / "stage1" / image_id(prompt, seed) / "stage1.pt"
+def _load_stage1(out: Path, prompt: str, seed: int, backend, arm: str = "stage1") -> Stage1Out:
+    path = out / arm / image_id(prompt, seed) / "stage1.pt"
     if not path.exists():
         raise JobFailure("missing_stage1")
     data = torch.load(path, weights_only=True)
@@ -265,7 +278,7 @@ def _object_keys(objects, known):
 
 def _run_stage2_arm(job, deps, out, tmp, meta, cond, measure, log):
     mode = STAGE2_MODES[job.arm]
-    stage1 = _load_stage1(out, job.prompt, job.seed, deps.backend)
+    stage1 = _load_stage1(out, job.prompt, job.seed, deps.backend, STAGE1_OF.get(job.arm, "stage1"))
     priors = None
     sar = dataclasses.replace(deps.sar_cfg, consistency=False) if job.arm == "stage1_sar_nocheck" else deps.sar_cfg
     if job.arm == "stage1_placebo":
@@ -316,6 +329,8 @@ def _execute(job: Job, deps: Deps, out: Path, tmp: Path) -> dict:
                                   state_kw={**cfg.state_kw, **ablation.get("state", {})})
         meta["ablation"] = ablation
     cond = _cond(job, deps)
+    if job.arm in NEGATIVE_ARMS:
+        meta["negative_prompt"] = _negative(job, deps)
     if job.arm == "prompt_weight":
         cond, meta["prompt_weight"] = _prompt_weighted(cond, job.prompt)
     meta["unmapped"] = cond.unmapped + (missing_phrases(job.prompt, job.program) if deps.measure_factory else [])
@@ -334,7 +349,7 @@ def _execute(job: Job, deps: Deps, out: Path, tmp: Path) -> dict:
             result = deps.stage1(deps.backend, job.program, cond, job.seed, deps.calib, measure, cfg, log,
                                  targets=targets, prompt=job.prompt)
             image, finals = result.image, result.finals
-            if job.arm == "stage1":
+            if job.arm in STAGE1_ARMS:
                 _save_stage1(result, tmp)
         _final_records(job, finals, base_finals, log)
     finally:

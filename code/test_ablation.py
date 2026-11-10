@@ -173,6 +173,9 @@ def test_exp3_rows_fill_our_three_methods_and_keep_the_rest_tbd():
     assert lines[1] == "S1 & 10.0 / 20.0 & 35.0 & 41.26 & 0.27 / 0.73 & 0.812\\\\"
     assert lines[0] == "SD3 & \\tbd & \\tbd & \\tbd & \\tbd & \\tbd\\\\"
     assert lines[2].startswith("\\textbf{FuzzyDiff} & \\tbd") and all(l.count("&") == 5 for l in lines)
+    from annotate import EXP3_NEG_ROWS
+    neg = exp3_table_rows({"size_violation": {"stage1_sar_neg": 20.0}}, None, EXP3_NEG_ROWS).splitlines()
+    assert neg[1].startswith("SD3 + negative prompt & ") and neg[3] == "\\textbf{FuzzyDiff} & \\tbd & 20.0 & \\tbd & \\tbd & \\tbd\\\\"
 
 
 def main():

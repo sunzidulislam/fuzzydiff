@@ -641,6 +641,31 @@ def test_arms_share_stage1_and_renoising():
     with_tmp(body)
 
 
+def test_negative_prompt_arms_change_only_the_unconditional_branch():
+    from negative import negative_prompt
+    centers = SETTINGS.get("hedge_centers", dict)
+    size = negative_prompt(translate("a kettle extremely bigger than a shoe"), centers)
+    assert size == "a shoe bigger than a kettle, a kettle and a shoe of the same size, only a kettle, only a shoe"
+    assert negative_prompt(translate("a puppy considerably smaller than a stool"), centers).startswith(
+        "a puppy bigger than a stool")
+    assert "same size" not in negative_prompt(translate("a bench barely bigger than a pillow"), centers)
+    assert negative_prompt(translate("a red mug and a blue teapot"), centers).endswith("a blue mug and a red teapot")
+
+    def body(tmp):
+        jobs_ = arm_jobs(rows()[:1], (0,), ["unguided", "stage1", "unguided_neg", "stage1_neg", "stage1_sar_neg"])
+        d = four_arm_deps()
+        s = run_jobs(jobs_, d, tmp)
+        assert s.failed == 0, s.failures
+        i = image_id(rows()[0].prompt, 0)
+        metas = {a: json.load(open(tmp / a / i / "meta.json")) for a in ("unguided", "unguided_neg", "stage1_sar_neg")}
+        assert "negative_prompt" not in metas["unguided"]
+        assert metas["unguided_neg"]["negative_prompt"] == "only a mug, only a teapot, a blue mug and a red teapot"
+        assert (tmp / "stage1_neg" / i / "stage1.pt").exists()
+        plain, neg = d.backend.encode_prompt(rows()[0].prompt), d.backend.encode_prompt(rows()[0].prompt, None, "x")
+        assert torch.equal(plain.embeds, neg.embeds) and not torch.equal(plain.uncond_embeds, neg.uncond_embeds)
+    with_tmp(body)
+
+
 def _job(prompt, arm="stage1_placebo"):
     return Job(arm, prompt, 0, "dev", "plain_color", translate(prompt))
 

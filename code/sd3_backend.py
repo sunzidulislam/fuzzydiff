@@ -141,13 +141,15 @@ class Backend:
         return z.to(self.tf_device)
 
     # ------------------------------------------------------------------------------ text
-    def encode_prompt(self, prompt: str, phrases: Optional[Dict[str, Tuple[int, int]]] = None) -> TextCond:
+    def encode_prompt(self, prompt: str, phrases: Optional[Dict[str, Tuple[int, int]]] = None,
+                      negative: str = "") -> TextCond:
+        """negative replaces the empty prompt of the unconditional CFG branch."""
         phrases = phrases or {}
-        key = (prompt, tuple(sorted(phrases.items())))
+        key = (prompt, tuple(sorted(phrases.items())), negative)
         if key not in self._text_cache:
             if self._encoder is None:
                 raise RuntimeError(f"prompt not cached and text encoders are unloaded: {prompt!r}")
-            cond = self._encoder(prompt)
+            cond = self._encoder(prompt, negative)
             cond.phrase_tokens, cond.unmapped = map_tokens(cond.t5_offsets, phrases, T5_TOKENS)
             self._text_cache[key] = cond
             self.n_text = cond.embeds.shape[1]
@@ -234,10 +236,10 @@ class Backend:
 
 # ---------------------------------------------------------------------------------- real checkpoint
 def _pipeline_encoder(pipe, device):
-    def encode(prompt: str) -> TextCond:
+    def encode(prompt: str, negative: str = "") -> TextCond:
         with torch.no_grad():
             embeds, uncond, pooled, uncond_pooled = pipe.encode_prompt(
-                prompt=prompt, prompt_2=None, prompt_3=None, negative_prompt="", device=torch.device(device),
+                prompt=prompt, prompt_2=None, prompt_3=None, negative_prompt=negative, device=torch.device(device),
                 do_classifier_free_guidance=True, max_sequence_length=T5_TOKENS)
         t5 = pipe.tokenizer_3(prompt, padding="max_length", max_length=T5_TOKENS, truncation=True,
                               return_offsets_mapping=True)
@@ -271,7 +273,7 @@ def _tiny_encoder(dt, n_t5=8):
         seed = int(hashlib.sha256(f"{text}|{shape}".encode()).hexdigest()[:8], 16)
         return torch.randn(*shape, generator=torch.Generator("cpu").manual_seed(seed), dtype=dt)
 
-    def encode(prompt: str) -> TextCond:
+    def encode(prompt: str, negative: str = "") -> TextCond:
         offsets, pos = [], 0
         for word in prompt.split():
             a = prompt.index(word, pos)
@@ -280,7 +282,7 @@ def _tiny_encoder(dt, n_t5=8):
         offsets = offsets[:n_t5] + [(0, 0)] * max(0, n_t5 - len(offsets))
         n = CLIP_TOKENS + n_t5
         valid = list(range(4)) + [CLIP_TOKENS + j for j, (a, b) in enumerate(offsets) if b > a]
-        return TextCond(rand(prompt, (1, n, 32)), rand(prompt, (1, 16)), rand("", (1, n, 32)), rand("", (1, 16)),
+        return TextCond(rand(prompt, (1, n, 32)), rand(prompt, (1, 16)), rand(negative, (1, n, 32)), rand(negative, (1, 16)),
                         valid, {}, offsets, clip_offsets=[(0, 0)] + offsets[:3])
     return encode
 
