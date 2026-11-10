@@ -331,3 +331,124 @@ Nothing so far shows a large advantage over SD3. Expect the blind rating to show
 | 18 | Check `results (5).zip`. | About 3 of 10 prompts clearly better, none worse. See 10a |
 | 19 | (15d printout pasted.) | Same data; it is the method's own scorer and overstates the gain |
 | 20 | Step-by-step, what do I do? | See 10d |
+
+## 11. Update: the Table 4 run, a model-made rating, the 400-prompt question, and how to reduce size violations
+
+### 11a. Table 4 run (`exp3_v2`, cells 15a and 15b)
+
+SD3, S1 (Stage 1) and FuzzyDiff (Stage 1 + SAR) on the 10 development size prompts, seed 0, setting `--sigma-hi 0.9 --clip rms --dmax 0.02 --eta0 0.04`, code at `2dfa94d`.
+
+**Result: Stage 1 is visibly better than SD3 on about 4 of 10 prompts and no worse on the others. SAR adds nothing, so the FuzzyDiff row is about equal to the S1 row.**
+
+| Prompt | S1 vs SD3 | FuzzyDiff vs S1 |
+|---|---|---|
+| a pumpkin slightly bigger than a vase | better: a vase now stands behind the pumpkin | texture only |
+| a puppy considerably smaller than a stool | better: stool larger and in full view; two small stray blobs | identical |
+| a drum extremely bigger than a radio | better: a radio-like box appears top left | texture only |
+| a bench moderately larger than a puppy | slightly better: bench more prominent | identical |
+| a kettle extremely bigger than a shoe | marginal: shoe a little smaller | identical |
+| a kitten nearly larger than a mirror | same | identical |
+| a blanket somewhat bigger than a drum | same (already right) | texture only |
+| a bowl moderately larger than a mug | same: still one bowl-mug hybrid | texture only |
+| a toaster slightly bigger than a radio | same: still no radio; an antenna and a blue patch appear | identical |
+| a bench barely bigger than a pillow | pixel-identical | texture only |
+
+- **SAR:** in 5 of 10 prompts its output was rejected by its own check and the Stage 1 image returned unchanged (reasons "attribute" four times, "spatial" once). In the other 5 it only re-rendered texture.
+- **Automatic columns:** text-image similarity 0.317 (SD3), 0.315 (S1), 0.319 (FuzzyDiff); text-text 0.791, 0.795, 0.790; every confidence interval of a difference includes zero. CLIP-IQA 0.866, 0.894, 0.881; S1 minus SD3 is +0.028 with interval 0.002 to 0.057, so guidance did not damage the pictures.
+- **Guided runs are not exactly repeatable.** The same prompt, seed and setting gave slightly different Stage 1 images here than in 15d (bowl/mug membership 1.00 there, 0.49 here; toaster score 3.92 there, 3.56 here). One seed per prompt is weak evidence.
+- **Time per prompt:** SD3 39 s, Stage 1 367 s (231 to 478), SAR 37 s, about 7.4 minutes for the three rows.
+
+### 11b. Rating made by Claude (an AI model), at the user's request
+
+**These are not blind human ratings and cannot fill the paper's human columns.** The rater knew which image came from which method, and is not a human annotator. They could only be reported as a model-based rating, labelled as such. Use them as a preview of what a blind rating is likely to show.
+
+| Row | Missing objects (lenient / strict) | Size violated | Fidelity (0-100) | Text-image / text-text | CLIP-IQA |
+|---|---|---|---|---|---|
+| SD3 | 30% / 30% | 90% | 49.0 | 0.32 / 0.79 | 0.866 |
+| S1 | 30% / 30% | 60% | 56.5 | 0.31 / 0.80 | 0.894 |
+| FuzzyDiff | 30% / 30% | 60% | 56.5 | 0.32 / 0.79 | 0.881 |
+
+Paired over the 10 prompts (scored with `score_mixture`, the project's own scorer):
+
+- Size, S1 vs SD3: 30 points fewer violations; better on 3, worse on 0, same on 7; 95% interval -60 to 0 (touches zero).
+- Fidelity, S1 vs SD3: +7.5; better on 5, worse on 2, same on 3; interval 1.0 to 15.0.
+- Missing objects, S1 vs SD3: no difference; one prompt gained an object (drum/radio) and one lost one (kitten/mirror).
+- FuzzyDiff vs S1: zero difference on everything.
+
+Rule used: "size" is whether the relation holds as worded, including the hedge; a missing object counts as violated.
+
+| Prompt | SD3 | S1 and FuzzyDiff |
+|---|---|---|
+| pumpkin slightly bigger than a vase | vase is a tiny figurine: size no, fidelity 45 | vase beside the pumpkin, slightly smaller: yes, 80 |
+| puppy considerably smaller than a stool | puppy as big as the visible stool: no, 55 | stool clearly larger: yes, 70 |
+| bench moderately larger than a puppy | puppy dominates: no, 50 | bench larger: yes (borderline), 62 |
+| drum extremely bigger than a radio | no radio: no, 35 | a radio-like box appears, not "extremely" smaller: no, 50 |
+| kettle extremely bigger than a shoe | no, 55 | shoe a little smaller, still not "extremely": no, 60 |
+| kitten nearly larger than a mirror | mirror present: no, 45 | looks like a tablet, not a mirror: no, 40 |
+| toaster slightly bigger than a radio | no radio: no, 30 | no radio, small artifact: no, 28 |
+| bowl moderately larger than a mug | one hybrid object: no, 30 | same: no, 30 |
+| blanket somewhat bigger than a drum | blanket far bigger than "somewhat": no, 60 | same: no, 60 |
+| bench barely bigger than a pillow | yes, 85 | yes, 85 |
+
+Three ratings are borderline and move the totals: the radio-like box in the drum image, the tablet-or-mirror in the kitten image, and the bench/puppy "yes". Flipping the bench/puppy one alone changes S1 from 60% to 70% violated.
+
+For the paper: rate `exp3_v2/size.html` by hand without opening `size.key.json`, then run 15c.
+
+### 11c. Can this be done for 400 prompts?
+
+Yes, with two limits: GPU time, and who rates 1,200 images.
+
+| Prompts | GPU time (7.4 min per prompt) | Kaggle sessions (12 h limit) |
+|---|---|---|
+| 100 | about 12 hours | 1-2 |
+| 137 | about 17 hours | 2 |
+| 400 | about 49 hours | 5 or more |
+
+- Kaggle's free GPU quota is about 30 hours a week, so 400 prompts is about two weeks on one account. Runs resume.
+- The development group has only 137 distinct size prompts; the runner refuses to draw more. The test group has 557, so 400 is possible only there.
+- The test group should be run once, after calibration. Running it now means the final Table 4 is on prompts already looked at.
+- Nobody can hand-rate 1,200 images. At that size the size relation has to be measured automatically; the repo has an independent detector for it (OWLv2 in `code/ladder.py`), plus a hand check on about 30 random prompts.
+
+Recommendation given: 137 development prompts now, scored with OWLv2 plus a 30-prompt hand check; 400 on the test group only after calibration.
+
+**Status: not in the repo.** A scoring script (`code/size_check.py`), its test and notebook cells 16a/16b were written and pushed as `2d62e3b`, then reverted (`fcf6044`) at the user's request, and both commits were then removed from the history with a force push that the user approved. The branch ends at `ea85bcf` on both the machine and GitHub. The script reported, per row, the share of images with a missing object, the share with the relation violated (object missing or relation the wrong way round) and the mean log box-area ratio; it did not check the hedge word.
+
+### 11d. How to reduce the size violations
+
+A stronger guidance setting fixes none of the causes: 0.03 already added artifacts without better size.
+
+Of the 6 prompts where Stage 1 still violated size (11b):
+
+| Cause | Prompts | What happens |
+|---|---|---|
+| An object is missing | toaster/radio, bowl/mug, kitten/mirror | The relation cannot hold with one object. Missing objects stayed at 30%, same as SD3. |
+| The scorer says "done" too early | kettle/shoe, drum/radio | Guidance stops once its own score reaches the lower edge of the target (0.99 against 0.95 to 1.90), but the picture does not yet look "extremely" bigger. |
+| The target has no upper limit | blanket/drum | "Somewhat bigger" is scored as "above 0.20", so a blanket five times the drum counts as correct and nothing pulls it back. |
+
+What to do, in order of expected gain, all inside the paper's method (its calibration sections):
+
+1. **Fit the size calibration.** The hedge centres and the two size quantiles are hand-set placeholders. This is why 4 of 10 prompts only get a one-sided target and why the scorer is satisfied too early. Addresses the second and third causes.
+2. **Add a presence model and validity flags for the noisiest bin.** Guidance now has to start at sigma 0.9, after SD3 has decided which objects exist. With a fitted presence model for the first steps it can act while the layout is open, the only point where a missing object can be added. Addresses the first cause.
+3. **Fit the presence models for the later bins.** The scorer reported the radio and the mug as present when they were not; while it believes an object is there, it applies no pressure to create it.
+4. **More than one seed per prompt.** This does not improve the model, but gives a fairer and more stable number.
+
+SAR is not on the list: it changed nothing in this run and acts on attribute binding more than on size.
+
+What it requires: annotated calibration images (the calibration group has about 9,400 size prompts to draw from; a few hundred annotated images is the usual scale), and the calibration-code fixes from the review first (the fit is evaluated on its own training data; the gradient-validity result is never enforced).
+
+What to expect: no number can be promised. The missing-object cause is the largest block (3 of the 6 violations), so step 2 has the most room, and is also the least certain.
+
+Proposed next step, not started: the calibration-code fixes.
+
+### 11e. Questions asked after section 10
+
+| # | Question | Short answer |
+|---|---|---|
+| 21 | Add this to the README. | Section 10 |
+| 22 | Check `results (4).zip`. | Table 4 run: S1 better on about 4 of 10, SAR adds nothing. See 11a |
+| 23 | You rate the images and return the result. | Done, as a model rating that is not blind. See 11b |
+| 24 | Can we calculate this for 400 prompts? | Yes, about 49 GPU hours and only from the test group; 137 development prompts recommended first. See 11c |
+| 25 | "Calculate it." | A scoring script and cells were added, then reverted and removed at the user's request. See 11c |
+| 26 | What is in the commit? | `size_check.py`, its test, notebook section 16; the revert removed exactly those |
+| 27 | Uncommit those changes. | Both commits removed locally and on GitHub (force push approved). Branch at `ea85bcf` |
+| 28 | How can I get fewer size violations? | Calibration: size targets, then presence for the noisiest bin. See 11d |
