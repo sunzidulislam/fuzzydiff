@@ -43,6 +43,7 @@ class GuideCfg:
     priority: bool = True                   # False: weighted sum, no projection and no per-tier acceptance
     acceptance: bool = True                 # False: the first candidate is taken unchecked
     cond_x0: bool = False                   # True: evidence on the conditional clean prediction, not the CFG one
+    clip: str = "peak"                      # dmax limits the largest latent change ("peak") or its RMS ("rms")
 
 
 @dataclass
@@ -115,9 +116,10 @@ def bounded_step(z, g, loss, cfg: GuideCfg):
     L = float(loss)
     eta = cfg.eta0 * cfg.c_sigma * L / (L + cfg.delta)
     direction = _direction(g, cfg)
-    peak = float(direction.abs().max())
-    if peak > 0 and eta * peak > cfg.dmax:
-        eta = cfg.dmax / peak
+    # the gradient sits on few latent values, so a peak limit of 0.2 left steps near 0.005 RMS on SD3 (Exp. iii log)
+    size = float(direction.abs().max()) if cfg.clip == "peak" else float(direction.pow(2).mean().sqrt())
+    if size > 0 and eta * size > cfg.dmax:
+        eta = cfg.dmax / size
     return z - eta * direction, eta
 
 

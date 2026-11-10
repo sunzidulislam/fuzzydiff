@@ -596,6 +596,7 @@ def main():
     ap.add_argument("--dmax", type=float, default=None, help="largest change to one latent value per step, for trying other limits")
     ap.add_argument("--eta0", type=float, default=None, help="base guidance step size, for the sweep")
     ap.add_argument("--sigma-hi", type=float, default=None, help="noise level where guidance starts (1.0 = from the first step), for the sweep")
+    ap.add_argument("--clip", default=None, choices=["peak", "rms"], help="dmax limits the largest latent change or its RMS")
     ap.add_argument("--steps", type=int, default=None, help="sampling steps of Stage 1 and unguided images, for comparing step counts")
     ap.add_argument("--limit", type=int, default=None, help="only the first N jobs")
     ap.add_argument("--calibration", default=None, help="fitted calibration file; provisional values if omitted")
@@ -649,7 +650,8 @@ def main():
         jobs = only_prompts(jobs, args.only_prompt)
     if args.only_setting:
         jobs = only_settings(jobs, args.only_setting)
-    jobs = with_overrides(jobs, dmax=args.dmax, steps=args.steps, eta0=args.eta0, sigma_hi=args.sigma_hi)
+    jobs = with_overrides(jobs, dmax=args.dmax, steps=args.steps, eta0=args.eta0, sigma_hi=args.sigma_hi,
+                          clip=args.clip)
     result = run_jobs(jobs[:args.limit], deps, args.out, resume_from=args.resume_from)
     n = merge_logs(args.out, Path(args.out) / "all.jsonl")
     print(json.dumps({"done": result.done, "skipped": result.skipped, "failed": result.failed,

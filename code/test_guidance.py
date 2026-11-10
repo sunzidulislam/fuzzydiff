@@ -67,6 +67,15 @@ def test_step_clip_bounds_every_element():
     assert abs(eta - 0.01 * 1 / 1.1) < 1e-6 and abs(z3[0] + eta) < 1e-6           # RMS-normalized, no clip
 
 
+def test_rms_clip_bounds_the_whole_step_not_its_largest_element():
+    g = torch.zeros(4)
+    g[0] = 100.
+    z, eta = bounded_step(torch.zeros(4), g, torch.tensor(1.), GuideCfg(**{**CFG.__dict__, "clip": "rms"}))
+    assert abs(float(z.pow(2).mean().sqrt()) - CFG.dmax) < 1e-6 and z[0] < -CFG.dmax   # one element moves past dmax
+    peak, peak_eta = bounded_step(torch.zeros(4), g, torch.tensor(1.), CFG)
+    assert eta > peak_eta
+
+
 def _ctx(backend, measure_fn=measure, log=None, targets=None, cfg=CFG, calib=PROV):
     return Stage1Ctx(backend=backend, program=PROGRAM, cond=backend.encode_prompt("a room"), calib=calib,
                      measure=measure_fn, cfg=cfg, state=new_state(), log=log or MemoryLog(), targets=targets,
