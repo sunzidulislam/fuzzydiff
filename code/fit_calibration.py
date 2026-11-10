@@ -21,8 +21,8 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from calibration_fit import (FittedCalibration, contiguous, cross_fit, fit_gamma, fit_hedge, fit_phi, fit_presence,  # noqa: E402
-                             fit_size_quantiles, pool_orientations, select_attention, select_binding, select_drift,
-                             validity_flags, _auroc)
+                             fit_size_quantiles, oof_size_coverage, pool_orientations, select_attention, select_binding,
+                             select_drift, validity_flags, _auroc)
 from color_stats import srgb_to_oklab  # noqa: E402
 from prompts import base_prompt  # noqa: E402
 from reporting import LeakageError, cluster_bootstrap, ece, read_jsonl, spearman  # noqa: E402
@@ -154,7 +154,9 @@ def _fit_presence_section(rows, s, min_images):
 
 
 def _fit_acceptance(rows, sigma_m, s):
-    intervals = {}
+    """Intervals [l, u, kappa_eff] for guidance, and per interval the rest of its fit (plateau, one-sided,
+    held-out likelihood, gamma) for reporting."""
+    intervals, details = {}, {}
     groups = defaultdict(list)
     for r in rows:
         groups[(r["family"], _qkey(r["quantity"]), str(r["hedge"]), r["orientation"])].append(r)
@@ -162,14 +164,18 @@ def _fit_acceptance(rows, sigma_m, s):
     for key, cell in groups.items():
         values = [r["s"] for r in cell]
         scale = (0.0, 1.0) if key[0] != "F8" else (0.0, max(values))
-        fits[key] = (fit_hedge(values, [r["accept"] for r in cell], scale=scale), cell)
-    for (family, quantity, hedge, orientation), (fit, cell) in fits.items():
+        fits[key] = (fit_hedge(values, [r["accept"] for r in cell], scale=scale), cell, scale)
+    for (family, quantity, hedge, orientation), (fit, cell, scale) in fits.items():
         gamma = 0.0
-        if family in sigma_m and all("s_hat" in r for r in cell):
+        # F8 is widened at run time by the pair's own c68 (constraints.Size.resolve); widening it here too
+        # would count the size estimator's error twice
+        if family in sigma_m and family != "F8" and all("s_hat" in r for r in cell):
             gamma = fit_gamma([r["s_hat"] for r in cell], [r["accept"] for r in cell], fit, sigma_m[family],
-                              [r["base"] for r in cell])
+                              [r["base"] for r in cell], s=[r["s"] for r in cell], scale=scale)
         kappa = float(np.sqrt(fit.kappa ** 2 + (gamma * sigma_m.get(family, 0.0)) ** 2))
-        intervals[f"{family}|{quantity}|{hedge}|{orientation}"] = [fit.l, fit.u, kappa]
+        key = f"{family}|{quantity}|{hedge}|{orientation}"
+        intervals[key] = [fit.l, fit.u, kappa]
+        details[key] = {"plateau": fit.plateau, "one_sided": fit.one_sided, "heldout_ll": fit.heldout_ll, "gamma": gamma}
         other = fits.get((family, quantity, hedge, -orientation))
         if family == "F8" and orientation == 1 and other is not None:
             data = ([r["s"] for r in cell], [r["accept"] for r in cell])
@@ -178,8 +184,11 @@ def _fit_acceptance(rows, sigma_m, s):
             if pool_orientations(fit, other[0], arrays):
                 joined = fit_hedge(np.concatenate([arrays[0][0], arrays[1][0]]), np.concatenate([arrays[0][1], arrays[1][1]]),
                                    scale=(0.0, max(np.max(arrays[0][0]), np.max(arrays[1][0]))))
-                intervals[f"{family}|{quantity}|{hedge}|pooled"] = [joined.l, joined.u, kappa]
-    return intervals
+                pooled = f"{family}|{quantity}|{hedge}|pooled"
+                intervals[pooled] = [joined.l, joined.u, kappa]
+                details[pooled] = {"plateau": joined.plateau, "one_sided": joined.one_sided,
+                                   "heldout_ll": joined.heldout_ll, "gamma": gamma}
+    return intervals, details
 
 
 def _heuristics(s):
@@ -226,15 +235,17 @@ def fit_main(input_path, out_path, settings=None, min_images=None):
     if data.get("presence"):
         parts["presence"], parts["valid"]["presence"] = _fit_presence_section(data["presence"], s, n_min)
     if data.get("acceptance"):
-        parts["intervals"] = _fit_acceptance(data["acceptance"], data.get("sigma_m", {}), s)
+        parts["intervals"], parts["interval_fits"] = _fit_acceptance(data["acceptance"], data.get("sigma_m", {}), s)
     models = None
     if data.get("size"):
         rows = data["size"]
-        models = fit_size_quantiles([[r["A_q"], r["A_r"]] for r in rows], [r["abs_error"] for r in rows],
-                                    [r["base"] for r in rows])
+        features, errors, bases = [[r["A_q"], r["A_r"]] for r in rows], [r["abs_error"] for r in rows], [r["base"] for r in rows]
+        models = fit_size_quantiles(features, errors, bases)
         by_bin = defaultdict(list)
         for r in rows:
             by_bin[str(r["bin"])].append(r)
+        bins = np.array([str(r["bin"]) for r in rows])
+        parts["size_coverage"] = oof_size_coverage(features, errors, bases, {f"bin {b}": bins == b for b in by_bin})
         stats = {b: {"n": _n_images(c), "rho_lb": _spearman_lb(c, "estimate", "human")} for b, c in by_bin.items()}
         flags = validity_flags(stats, n_min, s.get("cfgNposMin"), s.get("cfgRhoMin"), s.get("cfgAUCMin"), s.get("cfgECEMax"))
         parts["valid"]["F8"] = contiguous({b: flags.get(b, False) for b in BINS})

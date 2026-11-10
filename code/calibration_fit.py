@@ -205,18 +205,23 @@ def fit_hedge(s, accept, scale=(0.0, 1.0), seed=0) -> HedgeFit:
                     _log_likelihood(s[test], a[test], l, u, kappa, plateau) / max(len(test), 1))
 
 
-def fit_gamma(s_hat, accept, hedge: HedgeFit, sigma_m, groups, grid=None) -> float:
-    """gamma_r in kappa_eff = sqrt(kappa^2 + (gamma sigma_m)^2): out-of-fold likelihood on estimated scores."""
+def fit_gamma(s_hat, accept, hedge: HedgeFit, sigma_m, groups, grid=None, s=None, scale=(0.0, 1.0)) -> float:
+    """gamma_r in kappa_eff = sqrt(kappa^2 + (gamma sigma_m)^2): out-of-fold likelihood on estimated scores.
+
+    Each gamma is scored on the held-out fold only, summed over folds. With the true scores s, the
+    acceptance curve is refit on the other folds first, so no held-out judgment shapes the curve."""
     s_hat, a = np.asarray(s_hat, float), np.asarray(accept, float)
     folds = np.array([fold_of(str(g)) for g in groups])
     grid = np.linspace(0, 3, 31) if grid is None else grid
-    chosen = []
+    total = np.zeros(len(grid))
     for i in range(FOLDS):
-        train = folds != i
-        scores = [_log_likelihood(s_hat[train], a[train], hedge.l, hedge.u,
-                                  math.sqrt(hedge.kappa ** 2 + (g * sigma_m) ** 2), hedge.plateau) for g in grid]
-        chosen.append(grid[int(np.argmax(scores))])
-    return float(np.mean(chosen))
+        test = folds == i
+        if not test.any() or test.all():
+            continue
+        h = hedge if s is None else fit_hedge(np.asarray(s, float)[~test], a[~test], scale=scale)
+        total += [_log_likelihood(s_hat[test], a[test], h.l, h.u, math.sqrt(h.kappa ** 2 + (g * sigma_m) ** 2),
+                                  h.plateau) for g in grid]
+    return float(grid[int(np.argmax(total))])
 
 
 def _ll_of(fit: HedgeFit, data):
@@ -266,6 +271,30 @@ def coverage(q: SizeQuantiles, features, abs_error, strata: Dict[str, np.ndarray
     out = {"all": rates(np.ones(len(err), dtype=bool))}
     for name, mask in strata.items():
         if np.asarray(mask).any():
+            out[name] = rates(np.asarray(mask))
+    return out
+
+
+def oof_size_coverage(features, abs_error, groups, strata: Dict[str, np.ndarray]) -> Dict[str, dict]:
+    """Coverage of c68 and c95 on held-out folds (grouped by base prompt), so it is not judged on its own
+    training data. strata, e.g. one mask per noise bin, show where the pooled quantiles miss."""
+    x, err, groups = np.asarray(features, float), np.asarray(abs_error, float), np.asarray(groups)
+    folds = np.array([fold_of(str(g)) for g in groups])
+    in68, in95, seen = np.zeros(len(err), bool), np.zeros(len(err), bool), np.zeros(len(err), bool)
+    for i in range(FOLDS):
+        test = folds == i
+        if not test.any() or test.all():
+            continue
+        q = fit_size_quantiles(x[~test], err[~test], groups[~test])
+        in68[test], in95[test], seen[test] = err[test] <= q.predict_c68(x[test]), err[test] <= q.predict_c95(x[test]), True
+
+    def rates(mask):
+        mask = mask & seen
+        return {"c68": float(in68[mask].mean()), "c95": float(in95[mask].mean()), "n": int(mask.sum())}
+
+    out = {"all": rates(np.ones(len(err), dtype=bool))}
+    for name, mask in strata.items():
+        if (np.asarray(mask) & seen).any():
             out[name] = rates(np.asarray(mask))
     return out
 

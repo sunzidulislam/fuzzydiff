@@ -148,6 +148,37 @@ def test_gamma_zero_when_no_noise_positive_with_noise():
     assert fit_gamma(*_gamma_data(0.0)) < 0.2 and fit_gamma(*_gamma_data(.1)) > 0.5
 
 
+def test_gamma_is_chosen_on_held_out_folds_with_the_curve_refit_on_the_others():
+    s_hat, a, f, sigma, groups = _gamma_data(.1)
+    s = np.random.default_rng(0).uniform(0, 1, len(s_hat))     # the true scores _gamma_data draws first
+    assert fit_gamma(s_hat, a, f, sigma, groups, s=s) > 0.5
+    assert fit_gamma(s, a, f, sigma, groups, s=s) < 0.2   # estimates equal to the truth need no widening
+
+
+def test_acceptance_fit_keeps_plateau_and_does_not_widen_size_twice():
+    from fit_calibration import _fit_acceptance
+    rows = []
+    for family, quantity in (("F2a", "lightness"), ("F8", "area")):
+        s, a = sample_acceptance(.3, .5, .08, .9, 1500)
+        noisy = s + np.random.default_rng(3).normal(0, .1, len(s))
+        rows += [{"family": family, "quantity": quantity, "hedge": "slightly", "orientation": 1, "s": float(x),
+                  "s_hat": float(y), "accept": int(z), "base": f"b{i % 100}"} for i, (x, y, z) in enumerate(zip(s, noisy, a))]
+    intervals, details = _fit_acceptance(rows, {"F2a": 0.1, "F8": 0.1}, None)
+    light, size = intervals["F2a|lightness|slightly|1"], intervals["F8|area|slightly|1"]
+    assert details["F2a|lightness|slightly|1"]["gamma"] > 0 and light[2] > size[2] - 1e-9
+    assert details["F8|area|slightly|1"]["gamma"] == 0.0
+    assert abs(details["F2a|lightness|slightly|1"]["plateau"] - .9) < .06
+
+
+def test_size_coverage_is_measured_out_of_fold_and_per_stratum():
+    from calibration_fit import oof_size_coverage
+    f, e, g = _size_errors(3000)
+    bins = np.array([i % 2 for i in range(len(e))])
+    cov = oof_size_coverage(f, e, g, {"bin 1": bins == 0, "bin 2": bins == 1})
+    assert cov["all"]["n"] == len(e) and abs(cov["all"]["c68"] - .68) < .05 and abs(cov["all"]["c95"] - .95) < .04
+    assert cov["bin 1"]["n"] + cov["bin 2"]["n"] == len(e)
+
+
 def test_pool_orientations():
     fit_a = fit_hedge(*sample_acceptance(.3, .5, .08, .9, 3000, seed=1))
     data_a = sample_acceptance(.3, .5, .08, .9, 3000, seed=1)
