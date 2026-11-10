@@ -132,6 +132,13 @@ def test_regime_is_fixed_and_inactive_before_t0():
     assert st.size_regime == r and (again.low, again.high) == (first.low, first.high) and again.weight > 0
 
 
+def test_same_hedge_gets_the_regime_target_before_both_objects_pass():
+    # toaster/radio in Exp. iii: SD3 never passed the gates and was scored on 0.15-0.30, the guided run on >= 0.20
+    before = freeze_step(size_prog("slightly"), ev_size(False), PROV, 2, new_state())[0]
+    after = freeze_step(size_prog("slightly"), ev_size(True), PROV, 2, new_state())[0]
+    assert (before.low, before.high) == (after.low, after.high) == (0.2, math.inf) and before.weight == 0
+
+
 def test_direction_regime_bound_is_c95():
     f = freeze_step(size_prog("slightly"), ev_size(True), PROV, 2, new_state())[0]
     assert f.low == 0.2 and math.isinf(f.high)

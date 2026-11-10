@@ -462,6 +462,16 @@ def test_i7_a_calibration_built_on_provisional_parts_is_not_fitted():
     with_tmp(body)
 
 
+def test_stage2_validity_ends_at_the_final_bin_without_gaps():
+    def body(tmp):
+        cells = {"1": {"n": 500, "rho_lb": 0.9}, "2": {"n": 500, "rho_lb": 0.0},
+                 "3": {"n": 500, "rho_lb": 0.9}, "4": {"n": 500, "rho_lb": 0.9}}
+        (tmp / "input.json").write_text(json.dumps({"stage2_cells": cells}))
+        c = fit_main(tmp / "input.json", tmp / "c.json", S, min_images=100)
+        assert [c.stage2_valid(b) for b in (1, 2, 3, 4)] == [False, False, True, True]
+    with_tmp(body)
+
+
 def test_i8_missing_presence_fit_leaves_objects_inactive_not_crashed():
     def body(tmp):
         (tmp / "input.json").write_text("{}")

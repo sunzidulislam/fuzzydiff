@@ -502,7 +502,7 @@ class FittedCalibration:
         return p["w_global"] * global_logit + p["w_region"] * region_logit + p["bias"]
 
     def size_quantiles(self, features):
-        if self.size_models is not None:
+        if self.size_models is not None and features is not None:
             x = [[float(features["A_q"]), float(features["A_r"])]]
             return (float(self.size_models.predict_c68(x)[0]), float(self.size_models.predict_c95(x)[0]))
         return (self.parts["size"]["c68"], self.parts["size"]["c95"])

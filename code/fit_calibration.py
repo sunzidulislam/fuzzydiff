@@ -264,7 +264,7 @@ def fit_main(input_path, out_path, settings=None, min_images=None):
         parts["drift"].update({k: None if c is None else [c.theta, c.delta_rel] for k, c in chosen.items()})
     if data.get("stage2_cells"):
         flags = validity_flags(data["stage2_cells"], n_min, s.get("cfgNposMin"), s.get("cfgRhoMin"), s.get("cfgAUCMin"), s.get("cfgECEMax"))
-        parts["stage2_valid"] = {b: flags.get(b, False) for b in BINS}
+        parts["stage2_valid"] = contiguous({b: flags.get(b, False) for b in BINS})
     parts["not_valid"] = sorted(f for f in ("F2a", "F6", "F8", "presence", "binding", "leakage")
                                 if not any(parts["valid"].get(f, {}).values()))
     calib = FittedCalibration(parts, models)

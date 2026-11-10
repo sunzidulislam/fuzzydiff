@@ -299,17 +299,22 @@ class Size(Scorer):
         return {"presence": present, "support": support, "confidence": True}
 
     def resolve(self, cid, c, evidence, calib, state, low, high, kappa, gates):
-        if cid not in state.size_regime and all(gates.values()):
-            c68, c95 = calib.size_quantiles({"A_q": evidence.objects[c.args[0]]["A"],
-                                             "A_r": evidence.objects[c.args[1]]["A"]})
-            regime = size_regime(low, high, c68, c95)
-            state.size_regime[cid] = regime
-            width = math.sqrt(kappa ** 2 + c68 ** 2)
-            state.size_bounds[cid] = (low, high, width) if regime == "graded" else (c95, math.inf, width)
+        """The regime is fixed at the first step both objects pass. Until then each step uses the regime
+        for the areas it has (or the calibration's default quantiles without them), so a hedge is never
+        scored against the raw interval in one run and the regime's target in another."""
         if cid in state.size_regime:
-            low, high, kappa = state.size_bounds[cid]
-            if state.size_regime[cid] == "unmeasurable":
-                gates["validity"] = False
+            regime, (low, high, kappa) = state.size_regime[cid], state.size_bounds[cid]
+        else:
+            objs = [evidence.objects.get(q) for q in c.args]
+            areas = all(o is not None and "A" in o for o in objs)
+            c68, c95 = calib.size_quantiles({"A_q": objs[0]["A"], "A_r": objs[1]["A"]} if areas else None)
+            regime = size_regime(low, high, c68, c95)
+            width = math.sqrt(kappa ** 2 + c68 ** 2)
+            low, high, kappa = (low, high, width) if regime == "graded" else (c95, math.inf, width)
+            if all(gates.values()):
+                state.size_regime[cid], state.size_bounds[cid] = regime, (low, high, kappa)
+        if regime == "unmeasurable":
+            gates["validity"] = False
         return low, high, kappa
 
 
