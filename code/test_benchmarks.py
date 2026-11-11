@@ -1,95 +1,110 @@
-"""Tests of benchmarks.py on a fake run folder. No torch needed.
+"""Tests of benchmarks.py on fake prompt files and run folders. No GPU or torch needed.
 Usage: python -I test_benchmarks.py
 """
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 from PIL import Image
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from benchmarks import export_geneval, export_t2i, read_t2i, subset  # noqa: E402
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from benchmarks import BENCHMARKS, export, subset  # noqa: E402
 
-
-def fake_id(prompt, seed):
-    return f"{abs(hash(prompt)) % 10 ** 8}_s{seed}"
-
-
-def make_run(root, arm, prompts, n, skip=()):
-    for prompt in prompts:
-        for seed in range(n):
-            if (prompt, seed) in skip:
-                continue
-            d = root / arm / fake_id(prompt, seed)
-            d.mkdir(parents=True)
-            Image.new("RGB", (4, 4), (seed, 0, 0)).save(d / "image.png")
-
-
-def test_geneval_layout_keeps_metadata_verbatim_and_drops_incomplete_prompts():
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        lines = ['{"tag": "single_object", "include": [{"class": "cow", "count": 1}], "prompt": "a photo of a cow"}',
+GENEVAL_LINES = ['{"tag": "single_object", "include": [{"class": "cow", "count": 1}], "prompt": "a photo of a cow"}',
                  '{"tag": "colors", "include": [{"class": "car", "count": 1, "color": "red"}], "prompt": "a photo of a red car"}',
                  '{"tag": "two_object", "include": [], "prompt": "a photo of a cat and a dog"}']
-        (root / "meta.jsonl").write_text("\n".join(lines) + "\n")
-        make_run(root / "run", "stage1", ["a photo of a cow", "a photo of a red car", "a photo of a cat and a dog"], 2,
-                 skip={("a photo of a red car", 1)})
-        done, missing = export_geneval(root / "run", "stage1", root / "meta.jsonl", root / "out", n=2, image_id=fake_id)
-        assert (done, missing) == (2, 1)
-        assert sorted(p.name for p in (root / "out").iterdir()) == ["00000", "00002"]   # index = line in the file
-        assert (root / "out" / "00002" / "metadata.jsonl").read_text() == lines[2] + "\n"
-        assert sorted(p.name for p in (root / "out" / "00000" / "samples").iterdir()) == ["0000.png", "0001.png"]
-        assert Image.open(root / "out" / "00000" / "samples" / "0001.png").getpixel((0, 0))[0] == 1   # image k = seed k
+COLOR_PROMPTS = ["a green bench and a blue bowl", "a red cake and a blue bench", "a red book and a brown sheep"]
 
 
-def test_t2i_names_files_prompt_and_running_number():
+def sources(root):
+    """Prompt files where the notebook clones them, relative to a sources folder."""
+    (root / "geneval/prompts").mkdir(parents=True)
+    (root / "geneval/prompts/evaluation_metadata.jsonl").write_text("\n".join(GENEVAL_LINES) + "\n")
+    (root / "T2I-CompBench/examples/dataset").mkdir(parents=True)
+    (root / "T2I-CompBench/examples/dataset/color_val.txt").write_text("\n".join(COLOR_PROMPTS) + "\n\n")
+    return root
+
+
+def run(root, arm, prompts, seeds, skip=(), failed=()):
+    """A run folder as run_experiment.py leaves it: one folder per image with meta.json and image.png."""
+    for i, prompt in enumerate(prompts):
+        for seed in seeds:
+            if (prompt, seed) in skip:
+                continue
+            d = root / arm / f"job{i}_s{seed}"
+            d.mkdir(parents=True)
+            meta = {"prompt": prompt, "seed": seed, **({"failed": "oom"} if (prompt, seed) in failed else {})}
+            (d / "meta.json").write_text(json.dumps(meta))
+            Image.new("RGB", (4, 4), (seed, 0, 0)).save(d / "image.png")
+    return root
+
+
+def test_geneval_export_keeps_each_prompt_line_and_its_position():
     with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "color_val.txt").write_text("a green bench and a blue bowl\na red cake and a blue bench\n\n")
-        make_run(root / "run", "unguided", ["a green bench and a blue bowl", "a red cake and a blue bench"], 3)
-        assert export_t2i(root / "run", "unguided", root / "color_val.txt", root / "out", n=3, image_id=fake_id) == (2, 0)
-        names = sorted(p.name for p in (root / "out" / "samples").iterdir())
-        assert names[0] == "a green bench and a blue bowl_000000.png" and len(names) == 6
-        assert "a red cake and a blue bench_000005.png" in names
-        # the official scorer reads the prompt before the first '_' and sorts on the number after the last
-        assert all(n.split("_")[0] in ("a green bench and a blue bowl", "a red cake and a blue bench") for n in names)
-        (root / "bad.txt").write_text("a snake_case prompt\n")
-        try:
-            read_t2i(root / "bad.txt")
-            raise AssertionError("a prompt with '_' must be refused")
-        except ValueError:
-            pass
+        tmp = Path(tmp)
+        src = sources(tmp / "src")
+        prompts = [json.loads(line)["prompt"] for line in GENEVAL_LINES]
+        r = run(tmp / "run", "stage1", prompts, [0, 1], skip={(prompts[1], 1)})
+        counts = export(BENCHMARKS["geneval"], r, "stage1", tmp / "out", src)
+        assert counts == {"exported": 2, "incomplete": 1, "not_run": 0, "seeds": 2}
+        assert sorted(p.name for p in (tmp / "out").iterdir()) == ["00000", "00002"]
+        assert (tmp / "out/00002/metadata.jsonl").read_text() == GENEVAL_LINES[2] + "\n"
+        assert sorted(p.name for p in (tmp / "out/00000/samples").iterdir()) == ["0000.png", "0001.png"]
+        assert Image.open(tmp / "out/00000/samples/0001.png").getpixel((0, 0))[0] == 1      # image k is seed k
 
 
-def test_prompt_lists_are_what_run_experiment_reads():
-    import subprocess
+def test_t2i_export_names_files_like_the_official_scorer_reads_them():
     with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "m.jsonl").write_text('{"tag": "a", "prompt": "a photo of a cow"}\n{"tag": "b", "prompt": "a photo of a dog"}\n')
-        here = os.path.dirname(os.path.abspath(__file__))
-        subprocess.run([sys.executable, "-I", os.path.join(here, "benchmarks.py"), "prompts", "--geneval",
-                        str(root / "m.jsonl"), "--out", str(root / "p.json")], check=True, capture_output=True)
-        assert json.loads((root / "p.json").read_text()) == ["a photo of a cow", "a photo of a dog"]
+        tmp = Path(tmp)
+        src = sources(tmp / "src")
+        r = run(tmp / "run", "unguided", COLOR_PROMPTS[:2], range(3), failed={(COLOR_PROMPTS[1], 2)})
+        counts = export(BENCHMARKS["color"], r, "unguided", tmp / "out", src)
+        assert counts == {"exported": 1, "incomplete": 1, "not_run": 1, "seeds": 3}       # a failed image is unfinished
+        names = sorted(p.name for p in (tmp / "out/samples").iterdir())
+        assert names == [f"{COLOR_PROMPTS[0]}_{k:06d}.png" for k in range(3)]
+        assert all(n.split("_")[0] == COLOR_PROMPTS[0] for n in names)                   # prompt before the first '_'
 
 
-def test_pilot_subset_is_reproducible_and_export_skips_prompts_not_run():
-    prompts = [f"a cat number {i}" for i in range(50)]
-    one = subset(prompts, 1)
-    assert len(one) == 1 and one == subset(prompts, 1)                       # same draw every time
-    assert len({subset(prompts, 1, seed=s)[0] for s in range(10)}) > 1          # the seed changes it
-    three = subset(prompts, 3)
-    assert three == [p for p in prompts if p in three]                        # file order kept
-    assert subset(prompts, None) == prompts and subset(prompts, 99) == prompts
+def test_pilot_exports_with_the_same_command_and_keeps_full_run_numbering():
     with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "shape_val.txt").write_text("a round clock and a square book\nan oblong cucumber and a teardrop plum\n")
-        make_run(root / "run", "stage1", ["an oblong cucumber and a teardrop plum"], 1)
-        only = {"an oblong cucumber and a teardrop plum"}
-        assert export_t2i(root / "run", "stage1", root / "shape_val.txt", root / "out", n=1, image_id=fake_id, only=only) == (1, 0)
-        # the running number still counts from the full file, so names match a full run's
-        assert [p.name for p in (root / "out" / "samples").iterdir()] == ["an oblong cucumber and a teardrop plum_000001.png"]
+        tmp = Path(tmp)
+        src = sources(tmp / "src")
+        r = run(tmp / "run", "stage1", [COLOR_PROMPTS[2]], [0])
+        assert export(BENCHMARKS["color"], r, "stage1", tmp / "out", src)["exported"] == 1
+        # third prompt of the file, 10 images per prompt in the full protocol: numbers start at 20
+        assert [p.name for p in (tmp / "out/samples").iterdir()] == [f"{COLOR_PROMPTS[2]}_000020.png"]
+
+
+def test_subset_is_fixed_and_in_file_order():
+    items = [f"prompt {i}" for i in range(50)]
+    assert subset(items, 3) == subset(items, 3) and subset(items, 3) == [p for p in items if p in subset(items, 3)]
+    assert len({subset(items, 1, seed=s)[0] for s in range(10)}) > 1
+    assert subset(items) == items and subset(items, 99) == items
+
+
+def test_command_line():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        src = sources(tmp / "src")
+
+        def call(*args):
+            return subprocess.run([sys.executable, "-I", os.path.join(HERE, "benchmarks.py"), *args, "--sources", str(src)],
+                                  check=True, capture_output=True, text=True).stdout
+        assert call("seeds", "geneval").strip() == "0,1,2,3" and call("seeds", "spatial").strip() == ",".join(map(str, range(10)))
+        call("prompts", "geneval", "--out", str(tmp / "p.json"))
+        assert json.loads((tmp / "p.json").read_text()) == ["a photo of a cow", "a photo of a red car", "a photo of a cat and a dog"]
+        call("prompts", "color", "--n", "1", "--out", str(tmp / "one.json"))
+        assert len(json.loads((tmp / "one.json").read_text())) == 1
+        bad = tmp / "bad"
+        (bad / "T2I-CompBench/examples/dataset").mkdir(parents=True)
+        (bad / "T2I-CompBench/examples/dataset/shape_val.txt").write_text("a snake_case prompt\n")
+        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "benchmarks.py"), "prompts", "shape", "--out",
+                            str(tmp / "x.json"), "--sources", str(bad)], capture_output=True, text=True)
+        assert r.returncode != 0 and "not allowed" in r.stderr
 
 
 if __name__ == "__main__":
