@@ -71,6 +71,10 @@ def main():
     assert fams.count("binding") == 2 and fams.count("leakage") == 2 and fams.count("F6") == 1, fams
     p = translate("a very dimly lit room")
     assert Constraint("F2a", ("room",), "very", "scene_lightness", -1) in p.constraints
+    # GenEval's frame names no object: the program is the scene's own
+    framed, plain = translate("a photo of a red cake and a blue bench"), translate("a red cake and a blue bench")
+    assert framed.constraints == plain.constraints and framed.objects == ["cake", "bench"]
+    assert "photo" not in translate("A photo of a cow").objects
     results["targeted cases"] = "pass"
 
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "translation_check.json")

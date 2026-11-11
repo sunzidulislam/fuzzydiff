@@ -237,8 +237,15 @@ def _degrade(prog: Program, reason: str) -> Program:
     return out
 
 
+# GenEval writes every prompt as "a photo of <scene>". The frame names no object, so it is removed before
+# parsing; the image is still generated from the full prompt.
+PHOTO_FRAME = "a photo of "
+
+
 def translate(prompt: str) -> Program:
     """Translate, then validate against the grammar; violations degrade to presence only."""
+    if prompt.lower().startswith(PHOTO_FRAME):
+        prompt = prompt[len(PHOTO_FRAME):]
     try:
         prog = _translate(prompt)
     except Exception as e:                       # any parse failure degrades, never raises
