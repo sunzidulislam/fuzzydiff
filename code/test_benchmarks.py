@@ -10,7 +10,7 @@ from pathlib import Path
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from benchmarks import export_geneval, export_t2i, read_t2i  # noqa: E402
+from benchmarks import export_geneval, export_t2i, read_t2i, subset  # noqa: E402
 
 
 def fake_id(prompt, seed):
@@ -72,6 +72,24 @@ def test_prompt_lists_are_what_run_experiment_reads():
         subprocess.run([sys.executable, "-I", os.path.join(here, "benchmarks.py"), "prompts", "--geneval",
                         str(root / "m.jsonl"), "--out", str(root / "p.json")], check=True, capture_output=True)
         assert json.loads((root / "p.json").read_text()) == ["a photo of a cow", "a photo of a dog"]
+
+
+def test_pilot_subset_is_reproducible_and_export_skips_prompts_not_run():
+    prompts = [f"a cat number {i}" for i in range(50)]
+    one = subset(prompts, 1)
+    assert len(one) == 1 and one == subset(prompts, 1)                       # same draw every time
+    assert len({subset(prompts, 1, seed=s)[0] for s in range(10)}) > 1          # the seed changes it
+    three = subset(prompts, 3)
+    assert three == [p for p in prompts if p in three]                        # file order kept
+    assert subset(prompts, None) == prompts and subset(prompts, 99) == prompts
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "shape_val.txt").write_text("a round clock and a square book\nan oblong cucumber and a teardrop plum\n")
+        make_run(root / "run", "stage1", ["an oblong cucumber and a teardrop plum"], 1)
+        only = {"an oblong cucumber and a teardrop plum"}
+        assert export_t2i(root / "run", "stage1", root / "shape_val.txt", root / "out", n=1, image_id=fake_id, only=only) == (1, 0)
+        # the running number still counts from the full file, so names match a full run's
+        assert [p.name for p in (root / "out" / "samples").iterdir()] == ["an oblong cucumber and a teardrop plum_000001.png"]
 
 
 if __name__ == "__main__":

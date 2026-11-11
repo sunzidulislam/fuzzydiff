@@ -4,6 +4,7 @@ Generation is ordinary run_experiment.py on the benchmark's own prompts; this fi
 directions:
 
   prompts  the official prompt file -> the JSON list run_experiment.py --prompts-file reads
+           (--n draws a reproducible random subset, for a pilot of the pipeline only: not a benchmark score)
   export   finished images of one arm -> the folder layout the official scorer reads
 
 Official layouts (read from each repository's README and evaluation scripts):
@@ -23,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import shutil
 from pathlib import Path
 
@@ -45,17 +47,28 @@ def read_t2i(path):
     return prompts
 
 
+def subset(prompts, n, seed=0):
+    """n prompts drawn at random, reproducibly, in file order. For a pilot only."""
+    if n is None or n >= len(prompts):
+        return list(prompts)
+    keep = set(random.Random(f"bench|{seed}").sample(range(len(prompts)), n))
+    return [p for i, p in enumerate(prompts) if i in keep]
+
+
 def _images(run, arm, prompt, n, image_id):
     paths = [Path(run) / arm / image_id(prompt, seed) / "image.png" for seed in range(n)]
     return paths if all(p.exists() for p in paths) else None
 
 
-def export_geneval(run, arm, metadata, out, n=GENEVAL_IMAGES, image_id=None):
-    """Copies the arm's images into GenEval's layout. Returns (exported, missing) prompt counts."""
+def export_geneval(run, arm, metadata, out, n=GENEVAL_IMAGES, image_id=None, only=None):
+    """Copies the arm's images into GenEval's layout. Returns (exported, missing) prompt counts.
+    only: the prompts that were run (a pilot); the others are not counted as missing."""
     image_id = image_id or _image_id()
     out = Path(out)
     done = missing = 0
     for i, (prompt, line) in enumerate(read_geneval(metadata)):
+        if only is not None and prompt not in only:
+            continue
         paths = _images(run, arm, prompt, n, image_id)
         if paths is None:
             missing += 1
@@ -69,13 +82,15 @@ def export_geneval(run, arm, metadata, out, n=GENEVAL_IMAGES, image_id=None):
     return done, missing
 
 
-def export_t2i(run, arm, prompt_file, out, n=T2I_IMAGES, image_id=None):
+def export_t2i(run, arm, prompt_file, out, n=T2I_IMAGES, image_id=None, only=None):
     """Copies the arm's images into <out>/samples, T2I-CompBench++'s layout. Returns (exported, missing)."""
     image_id = image_id or _image_id()
     samples = Path(out) / "samples"
     samples.mkdir(parents=True, exist_ok=True)
     done = missing = 0
     for i, prompt in enumerate(read_t2i(prompt_file)):
+        if only is not None and prompt not in only:
+            continue
         paths = _images(run, arm, prompt, n, image_id)
         if paths is None:
             missing += 1
@@ -98,6 +113,8 @@ def main():
     p.add_argument("--geneval")
     p.add_argument("--t2i")
     p.add_argument("--out", required=True)
+    p.add_argument("--n", type=int, default=None, help="a random subset of n prompts, for a pilot of the pipeline only")
+    p.add_argument("--seed", type=int, default=0)
     e = sub.add_parser("export")
     e.add_argument("--run", required=True)
     e.add_argument("--arm", required=True)
@@ -105,21 +122,24 @@ def main():
     e.add_argument("--t2i")
     e.add_argument("--images", type=int, default=None, help=f"per prompt; default {GENEVAL_IMAGES} (GenEval), {T2I_IMAGES} (T2I)")
     e.add_argument("--out", required=True)
+    e.add_argument("--only", default=None, help="JSON prompt list that was run (a pilot); other prompts are skipped")
     args = ap.parse_args()
     if bool(args.geneval) == bool(args.t2i):
         ap.error("give exactly one of --geneval and --t2i")
     if args.cmd == "prompts":
         prompts = [p for p, _ in read_geneval(args.geneval)] if args.geneval else read_t2i(args.t2i)
+        prompts = subset(prompts, args.n, args.seed)
         Path(args.out).write_text(json.dumps(prompts, indent=1), encoding="utf-8")
         print(f"{len(prompts)} prompts -> {args.out}")
         return
     import os
     import sys
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    only = set(json.loads(Path(args.only).read_text(encoding="utf-8"))) if args.only else None
     if args.geneval:
-        done, missing = export_geneval(args.run, args.arm, args.geneval, args.out, args.images or GENEVAL_IMAGES)
+        done, missing = export_geneval(args.run, args.arm, args.geneval, args.out, args.images or GENEVAL_IMAGES, only=only)
     else:
-        done, missing = export_t2i(args.run, args.arm, args.t2i, args.out, args.images or T2I_IMAGES)
+        done, missing = export_t2i(args.run, args.arm, args.t2i, args.out, args.images or T2I_IMAGES, only=only)
     print(f"{args.arm}: exported {done} prompts to {args.out}; {missing} left out (an image not finished)")
     if missing:
         print("the benchmark score is over the exported prompts only: finish the run before reporting it")
