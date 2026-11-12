@@ -35,9 +35,11 @@ def write_rows(out_dir):
     ar_path = os.path.join(out_dir, "arch_check.json")
     ar = json.load(open(ar_path)) if os.path.exists(ar_path) else None
 
-    def arch(key, tag):  # SD3-Medium has no QK-norm, so the arch check fills the no-QK-norm rows only
+    def arch(key, tag):  # tagged keys cover both variants; an older arch_check.json has untagged no-QK-norm keys
         if ar is None:
             return "\\tbd"
+        if f"{key}_{tag}" in ar:
+            return _fmt(ar[f"{key}_{tag}"])
         return _fmt(ar[key]) if (tag == "no qk-norm" and key in ar) else "--"
     lines = []
     for tag in ("no qk-norm", "qk-norm"):
@@ -49,9 +51,12 @@ def write_rows(out_dir):
             elif tag == ck_qk and key in ck:
                 c = _fmt(ck[key])
             else:
-                c = "--"
+                c = "n/a"           # the checkpoint has one attention variant; SD3-Medium has no QK-norm
             lines.append(f"{label}{sfx} & {r} & {arch(key, tag)} & {c}\\\\")
-    lines.append("Finite-difference gradcheck of readout & " + _fmt(rnd["gradcheck_readout"]) + " & -- & --\\\\")
+    ar_gc = "\\tbd" if ar is None else _fmt(ar["gradcheck_readout"]) if "gradcheck_readout" in ar else "--"
+    # float64 gradcheck; the checkpoint runs in 16 bits, so its column has the directional-derivative row instead
+    lines.append("Finite-difference gradcheck of readout & " + _fmt(rnd["gradcheck_readout"]) + " & " + ar_gc
+                 + " & n/a\\\\")
     c = "\\tbd" if ck is None else _fmt(ck.get("fd_grad", "--"))
     lines.append("Finite-difference directional derivative, full model & " + _fmt(rnd["fd_grad_no qk-norm"]) + " & "
                  + arch("fd_grad", "no qk-norm") + " & " + c + "\\\\")

@@ -6,46 +6,87 @@
   "heads": 24,
   "head_dim": 64,
   "last_block_context_pre_only": true,
-  "identity_out": [
+  "identity_out_no qk-norm": [
     0.0,
     0.0
   ],
-  "identity_grad": [
+  "identity_grad_no qk-norm": [
     0.0,
     0.0
   ],
-  "sar_r1_out": [
+  "sar_r1_out_no qk-norm": [
     0.0,
     0.0
   ],
-  "readout_val": [
-    1.3010426069826053e-18,
-    6.890752175818118e-16
+  "readout_val_no qk-norm": [
+    1.0842021724855044e-18,
+    6.165573181410844e-16
   ],
-  "share_val": [
+  "share_val_no qk-norm": [
     4.163336342344337e-17,
-    4.473875412628639e-16
+    4.473875360680175e-16
   ],
-  "mass_val": [
-    2.7755575615628914e-17,
-    7.041034836335587e-16
+  "mass_val_no qk-norm": [
+    2.0816681711721685e-17,
+    5.28077612407497e-16
   ],
-  "readout_grad": [
-    5.963111948670274e-19,
-    1.8391941948509276e-15
+  "readout_grad_no qk-norm": [
+    4.632211430296955e-22,
+    1.712976856469325e-15
   ],
-  "sar_equiv": [
-    1.3322676295501878e-15,
-    5.362137948850983e-16
+  "sar_equiv_no qk-norm": [
+    1.7763568394002505e-15,
+    7.149517393573939e-16
   ],
-  "sar_uncond": [
+  "sar_uncond_no qk-norm": [
     0.0,
     0.0
   ],
-  "fd_grad": [
-    2.2718111836184107e-09,
-    5.833855230931154e-11
+  "fd_grad_no qk-norm": [
+    4.727322533426559e-08,
+    1.213580216207156e-09
   ],
-  "torch": "2.15.0+cu132",
+  "identity_out_qk-norm": [
+    0.0,
+    0.0
+  ],
+  "identity_grad_qk-norm": [
+    0.0,
+    0.0
+  ],
+  "sar_r1_out_qk-norm": [
+    0.0,
+    0.0
+  ],
+  "readout_val_qk-norm": [
+    3.469446951953614e-18,
+    1.0608741641569456e-15
+  ],
+  "share_val_qk-norm": [
+    4.163336342344337e-17,
+    4.2395929111155187e-16
+  ],
+  "mass_val_qk-norm": [
+    2.0816681711721685e-17,
+    4.626667491692292e-16
+  ],
+  "readout_grad_qk-norm": [
+    1.1858461261560205e-20,
+    4.252722976415489e-15
+  ],
+  "sar_equiv_qk-norm": [
+    1.7763568394002505e-15,
+    7.151443300798728e-16
+  ],
+  "sar_uncond_qk-norm": [
+    0.0,
+    0.0
+  ],
+  "fd_grad_qk-norm": [
+    0.00018009256542939056,
+    4.574856956019361e-06
+  ],
+  "gradcheck_readout": true,
+  "torch": "2.15.0+cpu",
   "diffusers": "0.31.0"
 }
