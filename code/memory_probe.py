@@ -264,6 +264,7 @@ def main():
     ap.add_argument("--vae-device", default=None)
     ap.add_argument("--resolution", type=int, default=1024)
     args = ap.parse_args()
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)   # before the measurements, so a run is never lost
     s = load_settings()
     if args.tiny:
         backend, (seg, siglip), text_gib = tiny_backend(), _tiny_estimators(), None
