@@ -103,16 +103,22 @@ def _fit_perceptual(rows, s, min_images):
     eps = s.get("cfgEpsPhi")
     for (family, quantity, b), cell in groups.items():
         def fit(train):
+            if len({r["e"] for r in train}) < 2:            # a map needs two distinct raw values
+                return None
             return fit_phi([r["e"] for r in train], [r["rating"] for r in train], [r["base"] for r in train], eps)
 
         def predict(model, test):
+            if model is None:
+                return []
             lo, hi = model.domain
             return [{"pred": float(model(torch.tensor(min(max(r["e"], lo), hi), dtype=torch.float64))),
                      "rating": r["rating"], "base": r["base"]} for r in test]
 
         oof = cross_fit(cell, fit, predict)
         cells[family].setdefault(quantity, {})[b] = {"n": _n_images(cell), "rho_lb": _spearman_lb(oof, "pred", "rating")}
-        phi.setdefault(family, {}).setdefault(quantity, {})[b] = fit(cell).to_dict()
+        model = fit(cell)
+        if model is not None:
+            phi.setdefault(family, {}).setdefault(quantity, {})[b] = model.to_dict()
     for family, per_quantity in cells.items():
         flags_all = {b: True for b in BINS}
         for stats in per_quantity.values():
@@ -150,7 +156,7 @@ def _fit_presence_section(rows, s, min_images):
         stats[b] = {"n": len(images), "npos": sum(images.values()), "nneg": len(images) - sum(images.values()),
                     "auc_lb": auc_lb, "ece_ub": ece_ub}
     flags = validity_flags(stats, min_images, s.get("cfgNposMin"), s.get("cfgRhoMin"), s.get("cfgAUCMin"), s.get("cfgECEMax"))
-    return models, contiguous({b: flags.get(b, False) for b in BINS})
+    return models, contiguous({b: flags.get(b, False) for b in BINS}), stats
 
 
 def _fit_acceptance(rows, sigma_m, s):
@@ -233,7 +239,8 @@ def fit_main(input_path, out_path, settings=None, min_images=None):
         flags = validity_flags(data["leakage_cells"], n_min, s.get("cfgNposMin"), s.get("cfgRhoMin"), s.get("cfgAUCMin"), s.get("cfgECEMax"))
         parts["valid"]["leakage"] = contiguous({b: flags.get(b, False) for b in BINS})
     if data.get("presence"):
-        parts["presence"], parts["valid"]["presence"] = _fit_presence_section(data["presence"], s, n_min)
+        parts["presence"], parts["valid"]["presence"], parts["presence_cells"] = _fit_presence_section(data["presence"], s,
+                                                                                                    n_min)
     if data.get("acceptance"):
         parts["intervals"], parts["interval_fits"] = _fit_acceptance(data["acceptance"], data.get("sigma_m", {}), s)
     models = None
@@ -247,6 +254,7 @@ def fit_main(input_path, out_path, settings=None, min_images=None):
         bins = np.array([str(r["bin"]) for r in rows])
         parts["size_coverage"] = oof_size_coverage(features, errors, bases, {f"bin {b}": bins == b for b in by_bin})
         stats = {b: {"n": _n_images(c), "rho_lb": _spearman_lb(c, "estimate", "human")} for b, c in by_bin.items()}
+        parts["size_cells"] = stats                 # kept for the per-bin validity table
         flags = validity_flags(stats, n_min, s.get("cfgNposMin"), s.get("cfgRhoMin"), s.get("cfgAUCMin"), s.get("cfgECEMax"))
         parts["valid"]["F8"] = contiguous({b: flags.get(b, False) for b in BINS})
     if data.get("attention_rows"):

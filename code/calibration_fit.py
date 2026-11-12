@@ -41,12 +41,13 @@ def _group_weights(groups):
 
 
 def cross_fit(rows: List[dict], fit, predict, k: int = FOLDS, group: str = "base") -> List[dict]:
-    """Grouped k-fold: fit on the other folds, predict on the held-out one, pool the predictions."""
+    """Grouped k-fold: fit on the other folds, predict on the held-out one, pool the predictions. A fold
+    with no training rows (every group of a small cell in one fold) is left out rather than fitted on nothing."""
     out = []
     for i in range(k):
         train = [r for r in rows if fold_of(r[group], k) != i]
         test = [r for r in rows if fold_of(r[group], k) == i]
-        if test:
+        if test and train:
             out.extend(predict(fit(train), test))
     return out
 
