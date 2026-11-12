@@ -9,9 +9,15 @@ SD3 ladder runs, with a meta.json, so code/ladder.py measures them like the othe
 """
 import argparse
 import json
+import os
 from pathlib import Path
 
-import torch
+# Kaggle images ship JAX and TensorFlow; diffusers and transformers import them when present, and their LLVM
+# clashes with PyTorch's ("Option 'bitcode-mdindex-threshold' registered more than once", abort).
+for name, value in (("USE_TF", "0"), ("USE_FLAX", "0"), ("USE_JAX", "0"), ("USE_TORCH", "1")):
+    os.environ.setdefault(name, value)
+
+import torch  # noqa: E402
 
 PLAN = Path(__file__).with_name("ladder_plan.json")
 MODEL = "stabilityai/stable-diffusion-xl-base-1.0"
