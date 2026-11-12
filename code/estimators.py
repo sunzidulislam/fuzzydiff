@@ -234,7 +234,8 @@ class SigLIPEvidence:
         from transformers import AutoProcessor, SiglipModel
         processor = AutoProcessor.from_pretrained(name)
         model = SiglipModel.from_pretrained(name, torch_dtype=dtype).to(device)
-        model.text_model.to("cpu")          # about 40% of the weights; embeddings are computed once per phrase
+        model.text_model.to("cpu", torch.float32)   # about 40% of the weights; embeddings are computed once per
+                                                    # phrase, in float32 on the CPU whatever the vision dtype
 
         def encode_text(text):
             tokens = processor.tokenizer([text], padding="max_length", return_tensors="pt")

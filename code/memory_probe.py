@@ -43,13 +43,14 @@ GIB = 2 ** 30
 PROMPT = "a kitten moderately larger than a pillow"
 
 
-def module_gib(obj) -> float:
-    """Parameters and buffers of a module, or of every module an object holds (an estimator wraps its model)."""
+def module_gib(obj, gpu_only=False) -> float:
+    """Parameters and buffers of a module, or of every module an object holds (an estimator wraps its model).
+    gpu_only counts what sits on a GPU (SigLIP keeps its text model on the CPU)."""
     modules = [obj] if isinstance(obj, torch.nn.Module) else [v for v in vars(obj).values() if isinstance(v, torch.nn.Module)]
     seen, total = set(), 0
     for m in modules:
         for t in list(m.parameters()) + list(m.buffers()):
-            if id(t) not in seen:
+            if id(t) not in seen and not (gpu_only and t.device.type != "cuda"):
                 seen.add(id(t))
                 total += t.numel() * t.element_size()
     return total / GIB
@@ -161,11 +162,13 @@ def _sar_step(backend, seg, sar, cond, z, sigma, sigma_next, heads):
 def probe(backend, seg, siglip, s, prompt=PROMPT, repeats=3, guided_steps=5, text_gib=None):
     calib = ProvisionalCalibration(s)
     cfg, sar = guide_cfg(s), sar_cfg(s)
+    gpu = torch.cuda.is_available()
     program = translate(prompt)
     cond = backend.encode_prompt(prompt, phrase_spans(prompt, program))
     result = {"prompt": prompt, "repeats": repeats,
               "weights_gb": {"mmdit": module_gib(backend.transformer), "vae": module_gib(backend.vae),
-                             "text_encoders": text_gib, "siglip": module_gib(siglip), "clipseg": module_gib(seg)}}
+                             "text_encoders": text_gib, "siglip": module_gib(siglip, gpu), "clipseg": module_gib(seg, gpu),
+                             "estimator_dtype": str(next(siglip.model.parameters()).dtype) if hasattr(siglip, "model") else None}}
     sigmas = backend.sigmas(cfg.steps)
     mid = cfg.steps // 2
     z = backend.noise_like_latent(0)
@@ -242,7 +245,7 @@ def report(result) -> str:
     w = result["weights_gb"]
     lines = [f"weights GB: MM-DiT {w['mmdit']:.2f}, VAE {w['vae']:.2f}, text encoders "
              f"{'--' if w['text_encoders'] is None else format(w['text_encoders'], '.2f')} (offloaded after encoding), "
-             f"SigLIP {w['siglip']:.2f}, CLIPSeg {w['clipseg']:.2f}"]
+             f"SigLIP {w['siglip']:.2f} (vision, on the GPU), CLIPSeg {w['clipseg']:.2f}, estimators in {w.get('estimator_dtype')}"]
     for key, label in (("unguided_step", "unguided CFG step"), ("readout_forward", "forward with image->text readout"),
                        ("vae_decode", "VAE decode (no grad)"), ("mmdit_backward", "MM-DiT fwd+bwd, ours"),
                        ("naive_mmdit_backward", "MM-DiT fwd+bwd, naive"), ("vae_backward", "VAE decode+bwd, ours"),
@@ -263,6 +266,8 @@ def main():
     ap.add_argument("--tf-device", default="cuda:0")
     ap.add_argument("--vae-device", default=None)
     ap.add_argument("--resolution", type=int, default=1024)
+    ap.add_argument("--estimator-dtype", default="float32", choices=["float16", "float32"],
+                    help="SigLIP and CLIPSeg weights, as run_experiment.py --estimator-dtype")
     args = ap.parse_args()
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)   # before the measurements, so a run is never lost
     s = load_settings()
@@ -274,8 +279,9 @@ def main():
         pipe = backend._pipe
         text_gib = sum(module_gib(e) for e in (pipe.text_encoder, pipe.text_encoder_2, pipe.text_encoder_3))
         device = args.vae_device or args.tf_device
-        seg = ClipSegSupport.from_pretrained(s.get("cfgCLIPSeg", str), device)
-        siglip = SigLIPEvidence.from_pretrained(s.get("cfgSigLIP", str), device)
+        est_dtype = getattr(torch, args.estimator_dtype)
+        seg = ClipSegSupport.from_pretrained(s.get("cfgCLIPSeg", str), device, est_dtype)
+        siglip = SigLIPEvidence.from_pretrained(s.get("cfgSigLIP", str), device, est_dtype)
     backend.encode_prompt(args.prompt, phrase_spans(args.prompt, translate(args.prompt)))
     if not args.tiny:
         backend.unload_text_encoders()

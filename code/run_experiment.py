@@ -613,6 +613,8 @@ def main():
     ap.add_argument("--dtype", default="float16", choices=["float16", "float32", "bfloat16"])
     # With CLIPSeg and SigLIP on its GPU, a float32 VAE ran out of memory on a T4 (measured).
     ap.add_argument("--vae-dtype", default="float16", choices=["float16", "float32"])
+    ap.add_argument("--estimator-dtype", default="float32", choices=["float16", "float32"],
+                    help="SigLIP and CLIPSeg weights; the completed runs used float32")
     ap.add_argument("--tiny", action="store_true", help="smoke test on the tiny random model (CPU)")
     ap.add_argument("--only-prompt", action="append", help="run only this prompt from the suite; can be repeated")
     ap.add_argument("--only-setting", action="append", help="run only this tuning setting and unguided; can be repeated")
@@ -666,8 +668,9 @@ def main():
             seg, siglip = _tiny_estimators()
         else:
             device = args.vae_device or args.tf_device
-            seg = ClipSegSupport.from_pretrained(s.get("cfgCLIPSeg", str), device)
-            siglip = SigLIPEvidence.from_pretrained(s.get("cfgSigLIP", str), device)
+            est_dtype = getattr(torch, args.estimator_dtype)
+            seg = ClipSegSupport.from_pretrained(s.get("cfgCLIPSeg", str), device, est_dtype)
+            siglip = SigLIPEvidence.from_pretrained(s.get("cfgSigLIP", str), device, est_dtype)
         estimators = EstimatorDeps(seg, siglip, calib, s)
         deps = Deps(backend, calib, None, cfg, s, unload_text=not args.tiny, seg=seg, sar_cfg=sar,
                     measure_factory=lambda prompt, cond, ablation="": Measure(estimators, prompt, cond, ablation))
