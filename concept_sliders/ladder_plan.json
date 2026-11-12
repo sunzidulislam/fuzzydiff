@@ -1,0 +1,1055 @@
+{
+ "seed": 0,
+ "images": [
+  {
+   "run": "ladder_attribute",
+   "prompt": "a barely dark jar",
+   "base": "a dark jar",
+   "rank": 0,
+   "image_id": "022bb5db514b_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a slightly dark jar",
+   "base": "a dark jar",
+   "rank": 1,
+   "image_id": "52221db83e48_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a moderately dark jar",
+   "base": "a dark jar",
+   "rank": 2,
+   "image_id": "cd8214ad43f5_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a very dark jar",
+   "base": "a dark jar",
+   "rank": 3,
+   "image_id": "992df5c2e1a3_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "an extremely dark jar",
+   "base": "a dark jar",
+   "rank": 4,
+   "image_id": "9bac43f28fe9_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a barely vivid bicycle",
+   "base": "a vivid bicycle",
+   "rank": 0,
+   "image_id": "eecb472fd200_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a slightly vivid bicycle",
+   "base": "a vivid bicycle",
+   "rank": 1,
+   "image_id": "1fd3f6307c9e_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a moderately vivid bicycle",
+   "base": "a vivid bicycle",
+   "rank": 2,
+   "image_id": "430d6de14558_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a very vivid bicycle",
+   "base": "a vivid bicycle",
+   "rank": 3,
+   "image_id": "7f01ba308197_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "an extremely vivid bicycle",
+   "base": "a vivid bicycle",
+   "rank": 4,
+   "image_id": "9d3005543837_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a barely pale umbrella",
+   "base": "a pale umbrella",
+   "rank": 0,
+   "image_id": "c45c122854d6_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a slightly pale umbrella",
+   "base": "a pale umbrella",
+   "rank": 1,
+   "image_id": "5b77a0d7a434_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a moderately pale umbrella",
+   "base": "a pale umbrella",
+   "rank": 2,
+   "image_id": "fe2ef0b72d25_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a very pale umbrella",
+   "base": "a pale umbrella",
+   "rank": 3,
+   "image_id": "d04a58bc3fea_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "an extremely pale umbrella",
+   "base": "a pale umbrella",
+   "rank": 4,
+   "image_id": "7928b4e1547a_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a barely muted teapot",
+   "base": "a muted teapot",
+   "rank": 0,
+   "image_id": "78cdbaab484a_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a slightly muted teapot",
+   "base": "a muted teapot",
+   "rank": 1,
+   "image_id": "28a17afb9bb6_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a moderately muted teapot",
+   "base": "a muted teapot",
+   "rank": 2,
+   "image_id": "1ca40601b7d4_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a very muted teapot",
+   "base": "a muted teapot",
+   "rank": 3,
+   "image_id": "4a6b8da1f2e5_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "an extremely muted teapot",
+   "base": "a muted teapot",
+   "rank": 4,
+   "image_id": "caa4ea4167b3_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a barely saturated stool",
+   "base": "a saturated stool",
+   "rank": 0,
+   "image_id": "ac30a0dd6341_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a slightly saturated stool",
+   "base": "a saturated stool",
+   "rank": 1,
+   "image_id": "7953623d27b7_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a moderately saturated stool",
+   "base": "a saturated stool",
+   "rank": 2,
+   "image_id": "86909d477d04_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a very saturated stool",
+   "base": "a saturated stool",
+   "rank": 3,
+   "image_id": "9a5dd8703a82_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "an extremely saturated stool",
+   "base": "a saturated stool",
+   "rank": 4,
+   "image_id": "defe19c01e0e_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a barely faded sofa",
+   "base": "a faded sofa",
+   "rank": 0,
+   "image_id": "d578a3f281d3_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a slightly faded sofa",
+   "base": "a faded sofa",
+   "rank": 1,
+   "image_id": "581701cc7e1d_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a moderately faded sofa",
+   "base": "a faded sofa",
+   "rank": 2,
+   "image_id": "89b864dd70f6_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a very faded sofa",
+   "base": "a faded sofa",
+   "rank": 3,
+   "image_id": "c31ccacbe0a5_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "an extremely faded sofa",
+   "base": "a faded sofa",
+   "rank": 4,
+   "image_id": "416b540516d7_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a barely vivid apple",
+   "base": "a vivid apple",
+   "rank": 0,
+   "image_id": "5a643c70e341_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a slightly vivid apple",
+   "base": "a vivid apple",
+   "rank": 1,
+   "image_id": "a457a802cf29_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a moderately vivid apple",
+   "base": "a vivid apple",
+   "rank": 2,
+   "image_id": "70d065f34b61_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a very vivid apple",
+   "base": "a vivid apple",
+   "rank": 3,
+   "image_id": "8faffb25f78d_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "an extremely vivid apple",
+   "base": "a vivid apple",
+   "rank": 4,
+   "image_id": "878aa3a85270_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a barely saturated hat",
+   "base": "a saturated hat",
+   "rank": 0,
+   "image_id": "bdab8ca094a2_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a slightly saturated hat",
+   "base": "a saturated hat",
+   "rank": 1,
+   "image_id": "5d2321093d8f_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a moderately saturated hat",
+   "base": "a saturated hat",
+   "rank": 2,
+   "image_id": "885c6db3c12b_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a very saturated hat",
+   "base": "a saturated hat",
+   "rank": 3,
+   "image_id": "9c2afd3bb24d_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "an extremely saturated hat",
+   "base": "a saturated hat",
+   "rank": 4,
+   "image_id": "cbba0c575890_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a barely vivid stool",
+   "base": "a vivid stool",
+   "rank": 0,
+   "image_id": "615e244a48ee_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a slightly vivid stool",
+   "base": "a vivid stool",
+   "rank": 1,
+   "image_id": "db70c8bc88ec_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a moderately vivid stool",
+   "base": "a vivid stool",
+   "rank": 2,
+   "image_id": "442023fa335b_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a very vivid stool",
+   "base": "a vivid stool",
+   "rank": 3,
+   "image_id": "7617c3b3843b_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "an extremely vivid stool",
+   "base": "a vivid stool",
+   "rank": 4,
+   "image_id": "c2a9eb8d387a_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a barely bright rabbit",
+   "base": "a bright rabbit",
+   "rank": 0,
+   "image_id": "2b3acca1375e_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a slightly bright rabbit",
+   "base": "a bright rabbit",
+   "rank": 1,
+   "image_id": "319e96f64920_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a moderately bright rabbit",
+   "base": "a bright rabbit",
+   "rank": 2,
+   "image_id": "82dfb1ba2ed4_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "a very bright rabbit",
+   "base": "a bright rabbit",
+   "rank": 3,
+   "image_id": "64025327d7bc_s0"
+  },
+  {
+   "run": "ladder_attribute",
+   "prompt": "an extremely bright rabbit",
+   "base": "a bright rabbit",
+   "rank": 4,
+   "image_id": "617553f6501c_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a barely pinkish-white pillow",
+   "base": "a pinkish-white pillow",
+   "rank": 0,
+   "image_id": "2989b58b9285_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a slightly pinkish-white pillow",
+   "base": "a pinkish-white pillow",
+   "rank": 1,
+   "image_id": "a6b3c8434aa4_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a moderately pinkish-white pillow",
+   "base": "a pinkish-white pillow",
+   "rank": 2,
+   "image_id": "40242e90598a_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a very pinkish-white pillow",
+   "base": "a pinkish-white pillow",
+   "rank": 3,
+   "image_id": "f6888100c6bc_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "an extremely pinkish-white pillow",
+   "base": "a pinkish-white pillow",
+   "rank": 4,
+   "image_id": "61a7df59c27b_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a barely yellowish-orange pillow",
+   "base": "a yellowish-orange pillow",
+   "rank": 0,
+   "image_id": "2ad7871cee96_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a slightly yellowish-orange pillow",
+   "base": "a yellowish-orange pillow",
+   "rank": 1,
+   "image_id": "ab61e4db423c_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a moderately yellowish-orange pillow",
+   "base": "a yellowish-orange pillow",
+   "rank": 2,
+   "image_id": "23f28cdae68b_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a very yellowish-orange pillow",
+   "base": "a yellowish-orange pillow",
+   "rank": 3,
+   "image_id": "5157c9f7ee2f_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "an extremely yellowish-orange pillow",
+   "base": "a yellowish-orange pillow",
+   "rank": 4,
+   "image_id": "3d1557815604_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a barely reddish-brown bicycle",
+   "base": "a reddish-brown bicycle",
+   "rank": 0,
+   "image_id": "16c1500917a0_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a slightly reddish-brown bicycle",
+   "base": "a reddish-brown bicycle",
+   "rank": 1,
+   "image_id": "fd3d814fd88f_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a moderately reddish-brown bicycle",
+   "base": "a reddish-brown bicycle",
+   "rank": 2,
+   "image_id": "37470300e7ef_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a very reddish-brown bicycle",
+   "base": "a reddish-brown bicycle",
+   "rank": 3,
+   "image_id": "6ca0a518f61f_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "an extremely reddish-brown bicycle",
+   "base": "a reddish-brown bicycle",
+   "rank": 4,
+   "image_id": "345e76d56163_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a barely bluish-purple candle",
+   "base": "a bluish-purple candle",
+   "rank": 0,
+   "image_id": "5962d6fb1cdd_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a slightly bluish-purple candle",
+   "base": "a bluish-purple candle",
+   "rank": 1,
+   "image_id": "03e34e4f948e_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a moderately bluish-purple candle",
+   "base": "a bluish-purple candle",
+   "rank": 2,
+   "image_id": "09dc9db3767b_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a very bluish-purple candle",
+   "base": "a bluish-purple candle",
+   "rank": 3,
+   "image_id": "67e424fce310_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "an extremely bluish-purple candle",
+   "base": "a bluish-purple candle",
+   "rank": 4,
+   "image_id": "de15b6b24070_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a barely yellowish-green mug",
+   "base": "a yellowish-green mug",
+   "rank": 0,
+   "image_id": "ba25a1ae84f2_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a slightly yellowish-green mug",
+   "base": "a yellowish-green mug",
+   "rank": 1,
+   "image_id": "a53e189ddb2e_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a moderately yellowish-green mug",
+   "base": "a yellowish-green mug",
+   "rank": 2,
+   "image_id": "31ebaa1e1440_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a very yellowish-green mug",
+   "base": "a yellowish-green mug",
+   "rank": 3,
+   "image_id": "28724ebb180c_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "an extremely yellowish-green mug",
+   "base": "a yellowish-green mug",
+   "rank": 4,
+   "image_id": "6d22a6b95b87_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a barely purple-pink teapot",
+   "base": "a purple-pink teapot",
+   "rank": 0,
+   "image_id": "05c07313246f_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a slightly purple-pink teapot",
+   "base": "a purple-pink teapot",
+   "rank": 1,
+   "image_id": "86d79ada941e_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a moderately purple-pink teapot",
+   "base": "a purple-pink teapot",
+   "rank": 2,
+   "image_id": "a0d3570c590f_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a very purple-pink teapot",
+   "base": "a purple-pink teapot",
+   "rank": 3,
+   "image_id": "4392c2b9b39e_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "an extremely purple-pink teapot",
+   "base": "a purple-pink teapot",
+   "rank": 4,
+   "image_id": "611589753686_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a barely grayish-blue bicycle",
+   "base": "a grayish-blue bicycle",
+   "rank": 0,
+   "image_id": "0937d61c765b_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a slightly grayish-blue bicycle",
+   "base": "a grayish-blue bicycle",
+   "rank": 1,
+   "image_id": "b91dee2ed1b6_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a moderately grayish-blue bicycle",
+   "base": "a grayish-blue bicycle",
+   "rank": 2,
+   "image_id": "855eacacc905_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a very grayish-blue bicycle",
+   "base": "a grayish-blue bicycle",
+   "rank": 3,
+   "image_id": "a97e4cab0311_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "an extremely grayish-blue bicycle",
+   "base": "a grayish-blue bicycle",
+   "rank": 4,
+   "image_id": "afda7978ff52_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a barely turquoise-green candle",
+   "base": "a turquoise-green candle",
+   "rank": 0,
+   "image_id": "9ca7f832f677_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a slightly turquoise-green candle",
+   "base": "a turquoise-green candle",
+   "rank": 1,
+   "image_id": "fc1263b53535_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a moderately turquoise-green candle",
+   "base": "a turquoise-green candle",
+   "rank": 2,
+   "image_id": "58368551e72c_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a very turquoise-green candle",
+   "base": "a turquoise-green candle",
+   "rank": 3,
+   "image_id": "e6d03493dee5_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "an extremely turquoise-green candle",
+   "base": "a turquoise-green candle",
+   "rank": 4,
+   "image_id": "ff5339e4e6e1_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a barely greenish-gray candle",
+   "base": "a greenish-gray candle",
+   "rank": 0,
+   "image_id": "3a17cdc1cc3c_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a slightly greenish-gray candle",
+   "base": "a greenish-gray candle",
+   "rank": 1,
+   "image_id": "94e0da735432_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a moderately greenish-gray candle",
+   "base": "a greenish-gray candle",
+   "rank": 2,
+   "image_id": "d9658573cfda_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a very greenish-gray candle",
+   "base": "a greenish-gray candle",
+   "rank": 3,
+   "image_id": "198307dcecdf_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "an extremely greenish-gray candle",
+   "base": "a greenish-gray candle",
+   "rank": 4,
+   "image_id": "189cc005fdcc_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a barely bluish-green umbrella",
+   "base": "a bluish-green umbrella",
+   "rank": 0,
+   "image_id": "1714e32ec7f3_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a slightly bluish-green umbrella",
+   "base": "a bluish-green umbrella",
+   "rank": 1,
+   "image_id": "e28c83ce2b27_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a moderately bluish-green umbrella",
+   "base": "a bluish-green umbrella",
+   "rank": 2,
+   "image_id": "10fa82ce7081_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "a very bluish-green umbrella",
+   "base": "a bluish-green umbrella",
+   "rank": 3,
+   "image_id": "2e847e837ba9_s0"
+  },
+  {
+   "run": "ladder_mixture",
+   "prompt": "an extremely bluish-green umbrella",
+   "base": "a bluish-green umbrella",
+   "rank": 4,
+   "image_id": "e783959f5c64_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a cushion barely bigger than an umbrella",
+   "base": "a cushion bigger than an umbrella",
+   "rank": 0,
+   "image_id": "6b45f972b196_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a cushion slightly bigger than an umbrella",
+   "base": "a cushion bigger than an umbrella",
+   "rank": 1,
+   "image_id": "f922ae5233bd_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a cushion moderately bigger than an umbrella",
+   "base": "a cushion bigger than an umbrella",
+   "rank": 2,
+   "image_id": "f3e4540726f0_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a cushion very bigger than an umbrella",
+   "base": "a cushion bigger than an umbrella",
+   "rank": 3,
+   "image_id": "855499c7ab86_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a cushion extremely bigger than an umbrella",
+   "base": "a cushion bigger than an umbrella",
+   "rank": 4,
+   "image_id": "9026bd819752_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a radio barely smaller than a teapot",
+   "base": "a radio smaller than a teapot",
+   "rank": 0,
+   "image_id": "d5337b9ffc3b_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a radio slightly smaller than a teapot",
+   "base": "a radio smaller than a teapot",
+   "rank": 1,
+   "image_id": "97090eba611b_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a radio moderately smaller than a teapot",
+   "base": "a radio smaller than a teapot",
+   "rank": 2,
+   "image_id": "183d697134db_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a radio very smaller than a teapot",
+   "base": "a radio smaller than a teapot",
+   "rank": 3,
+   "image_id": "3bc1c5216a7a_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a radio extremely smaller than a teapot",
+   "base": "a radio smaller than a teapot",
+   "rank": 4,
+   "image_id": "06c7091151f0_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a teapot barely larger than a candle",
+   "base": "a teapot larger than a candle",
+   "rank": 0,
+   "image_id": "9abd27868559_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a teapot slightly larger than a candle",
+   "base": "a teapot larger than a candle",
+   "rank": 1,
+   "image_id": "1260aba9cc0c_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a teapot moderately larger than a candle",
+   "base": "a teapot larger than a candle",
+   "rank": 2,
+   "image_id": "cd6bc0b8b8c3_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a teapot very larger than a candle",
+   "base": "a teapot larger than a candle",
+   "rank": 3,
+   "image_id": "f86b4006b7d6_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a teapot extremely larger than a candle",
+   "base": "a teapot larger than a candle",
+   "rank": 4,
+   "image_id": "3dd955491066_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a kettle barely bigger than an apple",
+   "base": "a kettle bigger than an apple",
+   "rank": 0,
+   "image_id": "8fb47a75ae2a_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a kettle slightly bigger than an apple",
+   "base": "a kettle bigger than an apple",
+   "rank": 1,
+   "image_id": "d5aebcd2ab6d_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a kettle moderately bigger than an apple",
+   "base": "a kettle bigger than an apple",
+   "rank": 2,
+   "image_id": "c1d6547300f2_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a kettle very bigger than an apple",
+   "base": "a kettle bigger than an apple",
+   "rank": 3,
+   "image_id": "310b49cdda4d_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a kettle extremely bigger than an apple",
+   "base": "a kettle bigger than an apple",
+   "rank": 4,
+   "image_id": "5caa17788880_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a bottle barely smaller than a pumpkin",
+   "base": "a bottle smaller than a pumpkin",
+   "rank": 0,
+   "image_id": "759f3e685257_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a bottle slightly smaller than a pumpkin",
+   "base": "a bottle smaller than a pumpkin",
+   "rank": 1,
+   "image_id": "946d27f34725_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a bottle moderately smaller than a pumpkin",
+   "base": "a bottle smaller than a pumpkin",
+   "rank": 2,
+   "image_id": "78b1fe671c6a_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a bottle very smaller than a pumpkin",
+   "base": "a bottle smaller than a pumpkin",
+   "rank": 3,
+   "image_id": "c5eefc0b3a4c_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a bottle extremely smaller than a pumpkin",
+   "base": "a bottle smaller than a pumpkin",
+   "rank": 4,
+   "image_id": "7a40013f6078_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a pumpkin barely larger than a toaster",
+   "base": "a pumpkin larger than a toaster",
+   "rank": 0,
+   "image_id": "8f9568a7fbff_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a pumpkin slightly larger than a toaster",
+   "base": "a pumpkin larger than a toaster",
+   "rank": 1,
+   "image_id": "4d28f5a703cd_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a pumpkin moderately larger than a toaster",
+   "base": "a pumpkin larger than a toaster",
+   "rank": 2,
+   "image_id": "c9ed482efadb_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a pumpkin very larger than a toaster",
+   "base": "a pumpkin larger than a toaster",
+   "rank": 3,
+   "image_id": "247890408e8b_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a pumpkin extremely larger than a toaster",
+   "base": "a pumpkin larger than a toaster",
+   "rank": 4,
+   "image_id": "78a98eb828ef_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a candle barely bigger than a helmet",
+   "base": "a candle bigger than a helmet",
+   "rank": 0,
+   "image_id": "a09cd6862e41_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a candle slightly bigger than a helmet",
+   "base": "a candle bigger than a helmet",
+   "rank": 1,
+   "image_id": "8d5b5c20a94c_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a candle moderately bigger than a helmet",
+   "base": "a candle bigger than a helmet",
+   "rank": 2,
+   "image_id": "07b5fe71c3ba_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a candle very bigger than a helmet",
+   "base": "a candle bigger than a helmet",
+   "rank": 3,
+   "image_id": "550a832fb709_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a candle extremely bigger than a helmet",
+   "base": "a candle bigger than a helmet",
+   "rank": 4,
+   "image_id": "93e0f060ba2d_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a bottle barely smaller than a basket",
+   "base": "a bottle smaller than a basket",
+   "rank": 0,
+   "image_id": "2d6e8f6106eb_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a bottle slightly smaller than a basket",
+   "base": "a bottle smaller than a basket",
+   "rank": 1,
+   "image_id": "cdcdb95bf294_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a bottle moderately smaller than a basket",
+   "base": "a bottle smaller than a basket",
+   "rank": 2,
+   "image_id": "2c869d9f85cb_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a bottle very smaller than a basket",
+   "base": "a bottle smaller than a basket",
+   "rank": 3,
+   "image_id": "a273abdd66d3_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a bottle extremely smaller than a basket",
+   "base": "a bottle smaller than a basket",
+   "rank": 4,
+   "image_id": "addac168fa9d_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a cactus barely larger than a plate",
+   "base": "a cactus larger than a plate",
+   "rank": 0,
+   "image_id": "ec7938f2dc60_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a cactus slightly larger than a plate",
+   "base": "a cactus larger than a plate",
+   "rank": 1,
+   "image_id": "f44f0b93a752_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a cactus moderately larger than a plate",
+   "base": "a cactus larger than a plate",
+   "rank": 2,
+   "image_id": "48bdeecc8bfb_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a cactus very larger than a plate",
+   "base": "a cactus larger than a plate",
+   "rank": 3,
+   "image_id": "da6da417b05c_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a cactus extremely larger than a plate",
+   "base": "a cactus larger than a plate",
+   "rank": 4,
+   "image_id": "79570d6d025f_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a backpack barely bigger than a hat",
+   "base": "a backpack bigger than a hat",
+   "rank": 0,
+   "image_id": "1da49a387b51_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a backpack slightly bigger than a hat",
+   "base": "a backpack bigger than a hat",
+   "rank": 1,
+   "image_id": "57205d53b8bd_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a backpack moderately bigger than a hat",
+   "base": "a backpack bigger than a hat",
+   "rank": 2,
+   "image_id": "eb7215b92651_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a backpack very bigger than a hat",
+   "base": "a backpack bigger than a hat",
+   "rank": 3,
+   "image_id": "71b5683edb90_s0"
+  },
+  {
+   "run": "ladder_size_v2",
+   "prompt": "a backpack extremely bigger than a hat",
+   "base": "a backpack bigger than a hat",
+   "rank": 4,
+   "image_id": "ace3b7b5f19c_s0"
+  }
+ ]
+}

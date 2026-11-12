@@ -348,11 +348,13 @@ def main():
     ap.add_argument("--runs", required=True, help="comma-separated ladder run folders")
     ap.add_argument("--out", required=True, help="summary JSON; per-image values go next to it as .jsonl")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument("--arms", default=",".join(LADDER_ARM_NAMES),
+                    help="comma-separated arm folders, e.g. sdxl for the Concept Sliders base model")
     args = ap.parse_args()
     from calibration import ProvisionalCalibration
     from settings import load_settings
     calib = ProvisionalCalibration(load_settings())
-    rows = measure_run(ladder_images(args.runs.split(",")), Owl(args.device), calib.prototype)
+    rows = measure_run(ladder_images(args.runs.split(","), args.arms.split(",")), Owl(args.device), calib.prototype)
     out = Path(args.out)
     with open(out.with_suffix(".jsonl"), "w") as f:
         for r in rows:
