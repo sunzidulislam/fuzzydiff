@@ -181,7 +181,9 @@ def cell_stats(rows, scale, folds=5):
         by_cat[r["category"]].append(r)
     cat_fits = {c: _fit(rs, scale) for c, rs in by_cat.items()}
     centres = [(f.l + f.u) / 2 for f in cat_fits.values() if f is not None]
-    half = None if pooled is None else max((pooled.u - pooled.l) / 2, 1e-6)
+    half = None if pooled is None else (pooled.u - pooled.l) / 2
+    if half is not None and half < 0.01 * (scale[1] - scale[0]):     # a collapsed pooled interval: no ratio
+        half = None
     tau_w = float(np.std(centres, ddof=1) / half) if half and len(centres) >= 2 else None
     oof_pooled, oof_cat, n_test = 0.0, 0.0, 0
     for k in range(folds):
