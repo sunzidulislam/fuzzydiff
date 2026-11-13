@@ -115,6 +115,14 @@ def _color_term(tok: str):
     return (tok, None, "single") if tok in COLORS else None
 
 
+def _single_color(head, hedge, color):
+    """A hedged single colour: white is graded by whiteness (F4), any other colour by its mixture
+    fraction on the axis from achromatic to the colour (F6)."""
+    if color == "white":
+        return Constraint("F4", (head,), hedge, "whiteness", +1)
+    return Constraint("F6", (head,), hedge, ("achromatic", color), +1)
+
+
 def _ish_color(tok):
     """'reddish' -> 'red', 'greenish' -> 'green', 'bluish' -> 'blue'; else None."""
     if tok.endswith("ish"):
@@ -169,7 +177,7 @@ def _modifiers(prog: Program, head: str, mods: List[str]):
             base = _ish_color(m)
             bound.append(m)
             if hedge != "__unsupported__":
-                prog.constraints.append(Constraint("F6", (head,), hedge or "slightly", ("achromatic", base), +1))
+                prog.constraints.append(_single_color(head, hedge or "slightly", base))
             hedge = None
             k += 1
             continue
@@ -201,7 +209,7 @@ def _modifiers(prog: Program, head: str, mods: List[str]):
             elif kind == "single":
                 # hedged single color: axis from achromatic (same L*) to the color prototype
                 if hedge is not None:
-                    prog.constraints.append(Constraint("F6", (head,), hedge, ("achromatic", base), +1))
+                    prog.constraints.append(_single_color(head, hedge, base))
             elif kind == "ish":       # 'greenish-gray': gray dominant, green tint
                 prog.constraints.append(Constraint("F6", (head,), hedge or "slightly", (base, tint), +1))
             else:                     # 'turquoise-green': balanced blend
@@ -394,7 +402,7 @@ def gold_soft_attribute(art, hedge, attr, obj):
             p.constraints.append(Constraint("F2b", (obj, attr), HEDGES[hedge], "siglip", +1))
     elif attr in COLORS:
         if hedge in HEDGES:
-            p.constraints.append(Constraint("F6", (obj,), HEDGES[hedge], ("achromatic", attr), +1))
+            p.constraints.append(_single_color(obj, HEDGES[hedge], attr))
     if hedge in UNSUPPORTED_ADVERBS:
         p.unsupported.append(f"adverb:{hedge}")
     p.constraints.append(Constraint("presence", (obj,), None, None, +1, tier=1))

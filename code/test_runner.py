@@ -765,7 +765,9 @@ def test_describe_program_says_what_will_and_will_not_be_guided():
     assert "not guided" in text.lower()
     guided = describe_program("a slightly dark mug on a wooden table")
     assert "F2a" in guided and "presence" in guided and "slightly" in guided
-    assert "F9" in describe_program("a mug left of a teapot") and "not guided" in describe_program("a mug left of a teapot")
+    spatial = describe_program("a mug left of a teapot")      # F9 has a scorer (centroid offset), so it is guided
+    assert "F9" in spatial and "not guided" not in spatial.lower()
+    assert "not guided" in describe_program("three mugs on a table").lower()
 
 
 class FullySet:

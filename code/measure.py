@@ -19,6 +19,7 @@ from estimators import area, centroid, exclusive_core, extent, object_photometri
 from grounding import aggregate_maps, binding, binding_keys, overlap  # noqa: E402
 
 MEASURE_ABLATIONS = ("attention_only", "overlap")
+WHITENESS_CHROMA = 0.04          # OKLab chroma at which F4 whiteness falls to 1/e of the lightness
 
 
 def measure_scene(backend, x0, out, program, bin):
@@ -59,7 +60,7 @@ class Measure:
             if self.ablation == "attention_only" and out is not None:
                 maps = self._grounded(out) if out.maps else {}
             self._objects(x, objects, ev, bin, maps)
-        needs_colour = any(c.family in ("F6", "leakage") for c in program.constraints)
+        needs_colour = any(c.family in ("F6", "leakage", "F4") for c in program.constraints)
         lab = srgb_to_oklab(x) if needs_colour else None
         for c in program.constraints:
             if c.family == "F2a" and c.quantity != "scene_lightness" and c.args[0] in ev.objects:
@@ -71,6 +72,12 @@ class Measure:
                 self._leakage(lab, c, ev)
             elif c.family == "F8":
                 self._size(c, ev)
+            elif c.family == "F2b" and c.args[0] in ev.objects:
+                self._open_vocabulary(x, c, ev)
+            elif c.family == "F4" and c.args[0] in ev.objects:
+                self._whiteness(lab, c, ev)
+            elif c.family == "F9" and all(q in ev.objects for q in c.args):
+                ev.pairs[("F9",) + tuple(c.args)] = (ev.objects[c.args[0]]["c"], ev.objects[c.args[1]]["c"])
         if out is not None and out.maps:
             self._attention(out, program, ev)
         return ev
@@ -114,6 +121,23 @@ class Measure:
         target = self._prototype(term, lab)
         scale = self.deps.calib.leakage_scale()
         ev.pairs[("leakage", term, other)] = torch.exp(-((mean[1:] - target[1:]) ** 2).sum() / (2 * scale ** 2))
+
+    def _open_vocabulary(self, x, c, ev):
+        """F2b: how much better the object's region matches 'attribute object' than 'object' (SigLIP region
+        logits), squashed to [0, 1]; 0.5 means the attribute adds nothing."""
+        q, attr = c.args
+        obj = ev.objects[q]
+        region = region_crop(x, obj["S"], self.box_k)
+        _, r_attr = self.deps.siglip.logits(x, region, f"{attr} {q}")
+        _, r_obj = self.deps.siglip.logits(x, region, q)
+        obj[f"f2b:{attr}"] = torch.sigmoid(r_attr - r_obj)
+
+    def _whiteness(self, lab, c, ev):
+        """F4: OKLab lightness of the object's core, damped by its chroma, in [0, 1]."""
+        obj = ev.objects[c.args[0]]
+        mean = trimmed_mean(lab, self._weights(obj["core"], lab))
+        chroma = torch.sqrt(mean[1] ** 2 + mean[2] ** 2 + 1e-12)
+        obj["whiteness"] = mean[0].clamp(0, 1) * torch.exp(-chroma / WHITENESS_CHROMA)
 
     def _size(self, c, ev):
         q, r = c.args

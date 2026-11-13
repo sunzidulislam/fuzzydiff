@@ -87,10 +87,43 @@ def test_invalid_family_is_inactive_then_ramps_in():
 
 
 def test_family_without_a_scorer_is_recorded_not_guided():
-    prog = Program(objects=[], constraints=[Constraint("F9", ("mug", "teapot"), None, "left", 1)])
+    prog = Program(objects=[], constraints=[Constraint("F7", ("mug",), None, "count", 1)])
     st = new_state()
     assert freeze_step(prog, evidence_with_L(50.0), PROV, 4, st) == []
-    assert "F9" in st.unguided
+    assert "F7" in st.unguided
+
+
+def _obj(p=0.9, **extra):
+    return {"p": torch.tensor(p, dtype=torch.float64), "h": torch.logit(torch.tensor(p, dtype=torch.float64)),
+            "A": torch.tensor(0.1, dtype=torch.float64), "psi": 1.0, **extra}
+
+
+def test_spatial_offset_is_positive_exactly_when_the_relation_holds():
+    left = Constraint("F9", ("mug", "teapot"), None, "left", 1)
+    right = Constraint("F9", ("mug", "teapot"), None, "right", 1)
+    c_mug, c_pot = torch.tensor([0.2, 0.5], dtype=torch.float64), torch.tensor([0.8, 0.5], dtype=torch.float64)
+    ev = Evidence(objects={"mug": _obj(c=c_mug), "teapot": _obj(c=c_pot)}, pairs={("F9", "mug", "teapot"): (c_mug, c_pot)})
+    f_left = freeze_step(Program(objects=["mug", "teapot"], constraints=[left]), ev, PROV, 4, new_state())[0]
+    f_right = freeze_step(Program(objects=["mug", "teapot"], constraints=[right]), ev, PROV, 4, new_state())[0]
+    assert abs(score(f_left, ev, PROV) - 0.6) < 1e-9 and abs(score(f_right, ev, PROV) + 0.6) < 1e-9
+    assert tier_losses([f_left], ev, PROV)[3] == 0 < tier_losses([f_right], ev, PROV)[3]
+
+
+def test_visibility_reads_presence_and_keeps_the_presence_gate_open():
+    c = Constraint("F1", ("deer",), "barely", "visibility", 1)
+    ev = Evidence(objects={"deer": _obj(p=0.2)})
+    f = freeze_step(Program(objects=["deer"], constraints=[c]), ev, PROV, 4, new_state())[0]
+    assert abs(score(f, ev, PROV) - 0.2) < 1e-9 and f.gates["presence"] and f.weight > 0
+
+
+def test_open_vocabulary_and_whiteness_read_their_evidence():
+    ev = Evidence(objects={"towel": _obj(**{"f2b:folded": torch.tensor(0.7, dtype=torch.float64),
+                                            "whiteness": torch.tensor(0.4, dtype=torch.float64)})})
+    f2b = freeze_step(Program(objects=["towel"], constraints=[Constraint("F2b", ("towel", "folded"), "very", "siglip", 1)]),
+                      ev, PROV, 4, new_state())[0]
+    f4 = freeze_step(Program(objects=["towel"], constraints=[Constraint("F4", ("towel",), "very", "whiteness", 1)]),
+                     ev, PROV, 4, new_state())[0]
+    assert abs(score(f2b, ev, PROV) - 0.7) < 1e-9 and abs(score(f4, ev, PROV) - 0.4) < 1e-9
 
 
 def size_prog(hedge="moderately", comp="larger"):

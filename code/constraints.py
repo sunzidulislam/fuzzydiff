@@ -318,8 +318,85 @@ class Size(Scorer):
         return low, high, kappa
 
 
+class Visibility(Scorer):
+    """F1: how visible the object is, its presence probability sigmoid(h) in [0, 1] ('barely visible X').
+    The presence gate stays open: a barely visible object is meant to fall below it."""
+
+    def raw(self, c, evidence, component):
+        obj = evidence.objects.get(c.args[0])
+        return None if obj is None else torch.sigmoid(obj["h"])
+
+    def score(self, c, evidence, calib, bin, component):
+        return self.raw(c, evidence, component)
+
+    def gates(self, c, evidence, calib, state, component):
+        return {"presence": True, "support": _support_gate(c.args[0], evidence, state), "confidence": True}
+
+
+class OpenVocabulary(Scorer):
+    """F2b: the SigLIP region contrast of 'attribute object' over 'object' (measure._open_vocabulary)."""
+
+    def raw(self, c, evidence, component):
+        return evidence.objects.get(c.args[0], {}).get(f"f2b:{c.args[1]}")
+
+    def score(self, c, evidence, calib, bin, component):
+        return self.raw(c, evidence, component)
+
+    def gates(self, c, evidence, calib, state, component):
+        gates = super().gates(c, evidence, calib, state, component)
+        gates["support"] = _support_gate(c.args[0], evidence, state)
+        return gates
+
+
+class Whiteness(Scorer):
+    """F4: OKLab whiteness of the object's core (measure._whiteness), in [0, 1]."""
+
+    def raw(self, c, evidence, component):
+        return evidence.objects.get(c.args[0], {}).get("whiteness")
+
+    def score(self, c, evidence, calib, bin, component):
+        return self.raw(c, evidence, component)
+
+    def gates(self, c, evidence, calib, state, component):
+        gates = super().gates(c, evidence, calib, state, component)
+        gates["support"] = _support_gate(c.args[0], evidence, state)
+        return gates
+
+
+SPATIAL_AXES = {"left": (0, +1), "right": (0, -1), "above": (1, +1), "below": (1, -1)}
+SPATIAL_MARGIN, SPATIAL_KAPPA = 0.05, 0.05
+
+
+class Spatial(Scorer):
+    """F9: the support centroids' offset along the stated axis, positive exactly when the relation holds
+    ('q left of r': r's x minus q's x; image y grows downward). Target: at least SPATIAL_MARGIN."""
+
+    def raw(self, c, evidence, component):
+        pair = evidence.pairs.get(("F9",) + tuple(c.args))
+        if pair is None:
+            return None
+        axis, sign = SPATIAL_AXES[c.quantity]
+        return sign * (pair[1][axis] - pair[0][axis])
+
+    def domain(self, c, calib, bin, component):
+        return (-1.0, 1.0)
+
+    def score(self, c, evidence, calib, bin, component):
+        return self.raw(c, evidence, component)
+
+    def interval(self, c, calib, component):
+        return (SPATIAL_MARGIN, math.inf, SPATIAL_KAPPA)
+
+    def gates(self, c, evidence, calib, state, component):
+        objs = [evidence.objects.get(q) for q in c.args]
+        present = all(o is not None and float(o["p"]) >= state.p_gate for o in objs)
+        return {"presence": present, "support": all(_support_gate(q, evidence, state) for q in c.args),
+                "confidence": True}
+
+
 FAMILY_SCORERS: Dict[str, Scorer] = {"F2a": Photometric(), "presence": Presence(), "binding": Binding(),
-                                     "leakage": Leakage(), "F6": Mixture(), "F8": Size()}
+                                     "leakage": Leakage(), "F6": Mixture(), "F8": Size(), "F1": Visibility(),
+                                     "F2b": OpenVocabulary(), "F4": Whiteness(), "F9": Spatial()}
 
 
 def scorer_for(c: Constraint) -> Optional[Scorer]:
