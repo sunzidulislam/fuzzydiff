@@ -164,6 +164,7 @@ class ClipSegSupport:
 
     def __init__(self, model, encode_text, mean, std, size=352, grid=64):
         self.model, self.encode_text, self.size, self.grid = _frozen(model), encode_text, size, grid
+        self.temperature = 1.0      # logits / temperature before the sigmoid; 1 is CLIPSeg's own support
         _checkpoint_vision(self.model, self.model.clip.vision_model)
         self.mean, self.std = mean, std
         self._texts = {}
@@ -202,7 +203,7 @@ class ClipSegSupport:
             cond = self._text(phrase).to(img.device, img.dtype)
             logits = self.model.decoder(activations, cond, return_dict=True).logits
             logits = logits.reshape(1, 1, *logits.shape[-2:])
-            out[phrase] = F.adaptive_avg_pool2d(torch.sigmoid(logits), self.grid)[0, 0].to(x.device, x.dtype)
+            out[phrase] = F.adaptive_avg_pool2d(torch.sigmoid(logits / self.temperature), self.grid)[0, 0].to(x.device, x.dtype)
         return out
 
 
