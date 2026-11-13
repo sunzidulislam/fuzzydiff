@@ -221,13 +221,8 @@ def table_rows(out_dir, settings=None) -> str:
             cells = [_cell(parts.get("size_cells", {}), b, n_min) for b in BINS]
         elif family == "support":
             cells = ["--"] * len(BINS)          # needs a Stage-2 run on G_cons with masks; not part of the pilot
-        else:
-            per_quantity = parts.get("cells", {}).get(family, {})
-            cells = []
-            for b in BINS:
-                options = [q[b] for q in per_quantity.values() if b in q]
-                worst = min(options, key=lambda st: st["rho_lb"]) if options else None
-                cells.append(_cell({b: worst}, b, n_min) if worst else "--")
+        else:                   # pooled over the family's quantities (fit_calibration._fit_perceptual)
+            cells = [_cell(parts.get("family_cells", {}).get(family, {}), b, n_min) for b in BINS]
         o = ood.get(family if family != "support" else "", {})
         last = f"{100 * o['share']:.1f}\\,\\% ({o['n']})" if o else "--"
         lines.append(f"{label} & " + " & ".join(cells) + f" & {last}\\\\")

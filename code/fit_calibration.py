@@ -100,6 +100,7 @@ def _fit_perceptual(rows, s, min_images):
     for r in rows:
         groups[(r["family"], _qkey(r["quantity"]), str(r["bin"]))].append(r)
     cells = defaultdict(dict)
+    pooled = defaultdict(lambda: defaultdict(list))  # family -> bin -> out-of-fold rows of every quantity
     eps = s.get("cfgEpsPhi")
     for (family, quantity, b), cell in groups.items():
         def fit(train):
@@ -112,10 +113,11 @@ def _fit_perceptual(rows, s, min_images):
                 return []
             lo, hi = model.domain
             return [{"pred": float(model(torch.tensor(min(max(r["e"], lo), hi), dtype=torch.float64))),
-                     "rating": r["rating"], "base": r["base"]} for r in test]
+                     "rating": r["rating"], "base": r["base"], "item": r.get("item")} for r in test]
 
         oof = cross_fit(cell, fit, predict)
         cells[family].setdefault(quantity, {})[b] = {"n": _n_images(cell), "rho_lb": _spearman_lb(oof, "pred", "rating")}
+        pooled[family][b].extend(oof)
         model = fit(cell)
         if model is not None:
             phi.setdefault(family, {}).setdefault(quantity, {})[b] = model.to_dict()
@@ -127,7 +129,11 @@ def _fit_perceptual(rows, s, min_images):
             for b in BINS:
                 flags_all[b] = flags_all[b] and flags.get(b, False)
         valid[family] = contiguous(flags_all)
-    return phi, valid, {f: dict(q) for f, q in cells.items()}
+    # per family and bin over all its quantities: each map predicts on the same rating scale, so the out-of-fold
+    # predictions pool; reported alongside the per-quantity cells (the gate stays per quantity)
+    family_cells = {f: {b: {"n": _n_images(rs), "rho_lb": _spearman_lb(rs, "pred", "rating")} for b, rs in per_bin.items()}
+                    for f, per_bin in pooled.items()}
+    return phi, valid, {f: dict(q) for f, q in cells.items()}, family_cells
 
 
 def _fit_presence_section(rows, s, min_images):
@@ -234,7 +240,7 @@ def fit_main(input_path, out_path, settings=None, min_images=None):
     parts["provisional_parts"] = [k for k in ("prototypes", "bounds", "leakage_scale", "psi", "size") if k not in data]
     parts["phi"], parts["cells"] = {}, {}
     if data.get("ratings"):
-        parts["phi"], parts["valid"], parts["cells"] = _fit_perceptual(data["ratings"], s, n_min)
+        parts["phi"], parts["valid"], parts["cells"], parts["family_cells"] = _fit_perceptual(data["ratings"], s, n_min)
     if data.get("leakage_cells"):
         flags = validity_flags(data["leakage_cells"], n_min, s.get("cfgNposMin"), s.get("cfgRhoMin"), s.get("cfgAUCMin"), s.get("cfgECEMax"))
         parts["valid"]["leakage"] = contiguous({b: flags.get(b, False) for b in BINS})
