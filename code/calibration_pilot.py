@@ -57,8 +57,9 @@ def degree_question(prompt):
     if c.family == "F8":
         word = next(w for w in ("larger", "bigger", "smaller") if w in prompt.split())
         return c, f"How much {word} is the {c.args[0]} than the {c.args[1]}? (0 not {word} at all, 100 far {word})"
-    words = [w for w in base_prompt(prompt).split() if w not in ("a", "an", "the") and w != obj]
-    word = " ".join(words) or c.family
+    words = base_prompt(prompt).split()           # the attribute sits between the article and the object;
+    head = words[1:words.index(obj)] if obj in words else []   # the scene after the object is not part of it
+    word = " ".join(head) or c.family
     return c, f"How {word} is the {obj}? (0 not {word} at all, 100 as {word} as it gets)"
 
 
