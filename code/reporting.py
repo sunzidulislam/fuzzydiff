@@ -143,7 +143,11 @@ def activation_rows(records: List[dict], n_act: int):
     """Tab. activation (bottom). Per family: first valid bin, median active steps per constraint,
     share of constraints with >= n_act active steps, most frequent blocking gate, accepted share
     on active steps, mean realized tier-3 loss change per accepted step, mean mu unguided -> guided."""
-    records = _check_fitted(records)
+    return activation_stats(_check_fitted(records), n_act)
+
+
+def activation_stats(records: List[dict], n_act: int):
+    """activation_rows without the fitted-calibration guard, for pilots on provisional runs (say so in the caption)."""
     cons = [r for r in records if r["type"] == "constraint"]
     fin = [r for r in records if r["type"] == "final"]
     out = {}
