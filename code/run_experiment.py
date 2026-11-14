@@ -54,7 +54,10 @@ COMMANDED = {"darker": -1, "brighter": +1}
 TARGET_BAND = 0.02
 UNGUIDED_ARMS = {"unguided", "ladder_unguided", "prompt_weight", "unguided_neg"}
 STAGE2_MODES = {"stage1_plain": "plain", "stage1_sar": "sar", "stage1_placebo": "sar", "stage1_sar_nocheck": "sar",
-                "stage1_sar_neg": "sar"}
+                "stage1_sar_neg": "sar", "stage1_sar_conf": "sar", "stage1_sar_comp": "sar"}
+# Stage 2 ablations: the SarCfg fields each arm changes (stage1_sar is the minimal form, both off)
+SAR_ARMS = {"stage1_sar_nocheck": {"consistency": False}, "stage1_sar_conf": {"confidence": True},
+            "stage1_sar_comp": {"competition": True}}
 # Arms with the negative prompt derived from the program (negative.py). unguided_neg is the control:
 # SD3 with the same negative prompt, so a gain of the method is not the negative prompt alone.
 NEGATIVE_ARMS = {"unguided_neg", "stage1_neg", "stage1_sar_neg"}
@@ -73,9 +76,14 @@ ABLATION_ARMS = {
     "abl_floored": {"state": {"loss": "floored"}},
     "abl_weighted_sum": {"cfg": {"priority": False}},
     "abl_no_acceptance": {"cfg": {"acceptance": False}},
+    "abl_no_backtrack": {"cfg": {"backtrack": 0}},
+    # hard domain gate: no cosine taper inside the domain (band 0) and no ramp after a gate opens (ramp 0)
+    "abl_hard_domain": {"state": {"band": 0.0, "ramp": 0}},
+    # w/o satisfaction gating: delta -> 0 makes eta = eta0 c(sigma) L / (L + delta) constant while L > 0
+    "abl_no_satisfaction": {"cfg": {"delta": 1e-12}},
 }
 ABLATION_TABLE_ARMS = ("unguided", "stage1", *ABLATION_ARMS, "stage1_plain", "stage1_sar", "stage1_placebo",
-                       "stage1_sar_nocheck")
+                       "stage1_sar_conf", "stage1_sar_comp", "stage1_sar_nocheck")
 # Tab. hedge ladder. prompt_weight is SD3 with the word the hedge modifies weighted by the hedge
 # (A1111-style weights, linear in hedge rank); the hedge stays in the prompt.
 LADDER_ARMS = ("unguided", "prompt_weight", "stage1", "stage1_sar")
@@ -289,7 +297,7 @@ def _run_stage2_arm(job, deps, out, tmp, meta, cond, measure, log):
     mode = STAGE2_MODES[job.arm]
     stage1 = _load_stage1(out, job.prompt, job.seed, deps.backend, STAGE1_OF.get(job.arm, "stage1"))
     priors = None
-    sar = dataclasses.replace(deps.sar_cfg, consistency=False) if job.arm == "stage1_sar_nocheck" else deps.sar_cfg
+    sar = dataclasses.replace(deps.sar_cfg, **SAR_ARMS.get(job.arm, {}))
     if job.arm == "stage1_placebo":
         priors, meta["placebo_from"] = _placebo_priors(job, deps, out, cond)
     result = run_stage2(deps.backend, stage1, cond, job.program, job.prompt, deps.calib, deps.seg, sar, job.seed, log,

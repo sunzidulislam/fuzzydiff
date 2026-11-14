@@ -466,13 +466,20 @@ ABLATION_ROWS = (("unguided", "SD3, no guidance"), ("stage1", "Stage~1 (full)"),
                  ("abl_floored", "\\quad floored log loss (saturating)"),
                  ("abl_weighted_sum", "\\quad weighted sum (no priority)"),
                  ("abl_no_acceptance", "\\quad w/o acceptance test"),
+                 ("abl_no_backtrack", "\\quad w/o backtracking"),
+                 ("abl_hard_domain", "\\quad hard domain gate (no smooth weight/ramp)"),
+                 ("abl_no_satisfaction", "\\quad w/o satisfaction gating ($\\delta\\to0$)"),
                  ("stage1_plain", "S1 + plain SD3 img2img"), ("stage1_sar", "S1 + SAR (logit bias, ours)"),
-                 ("stage1_placebo", "S1 + SAR, placebo priors"), ("stage1_sar_nocheck", "S1 + SAR w/o consistency check"))
+                 ("stage1_placebo", "S1 + SAR, placebo priors"),
+                 ("stage1_sar_conf", "\\quad + confidence scaling $\\gamma_q$"),
+                 ("stage1_sar_comp", "\\quad + competition (exclusive pairs)"),
+                 ("stage1_sar_nocheck", "S1 + SAR w/o consistency check"))
 ABLATION_ARM_NAMES = tuple(a for a, _ in ABLATION_ROWS if a)
 ABLATION_COMPARISONS = (("stage1", "unguided"),
                         *((a, "stage1") for a in ABLATION_ARM_NAMES if a.startswith("abl_")),
                         ("stage1_plain", "stage1"), ("stage1_sar", "stage1"), ("stage1_sar", "stage1_plain"),
-                        ("stage1_placebo", "stage1_sar"), ("stage1_sar_nocheck", "stage1_sar"))
+                        ("stage1_placebo", "stage1_sar"), ("stage1_sar_conf", "stage1_sar"),
+                        ("stage1_sar_comp", "stage1_sar"), ("stage1_sar_nocheck", "stage1_sar"))
 
 
 def _size_question(prompt):

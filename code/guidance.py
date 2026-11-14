@@ -345,7 +345,7 @@ def _raw(f, evidence):
 
 
 def run_stage1(backend, program, cond, seed, calib, measure, cfg: GuideCfg, log, targets=None, prompt="") -> Stage1Out:
-    state = new_state(ramp=cfg.ramp, **cfg.state_kw)
+    state = new_state(**{"ramp": cfg.ramp, **cfg.state_kw})         # an ablation's state wins
     ctx = Stage1Ctx(backend, program, cond, calib, measure, cfg, state, log, targets, prompt, seed)
     sigmas = backend.sigmas(cfg.steps)
     z = backend.noise_like_latent(seed)
