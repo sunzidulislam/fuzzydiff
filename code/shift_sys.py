@@ -54,7 +54,7 @@ def build_records(out: Path, settings):
         meta = json.loads(meta_path.read_text())
         if "failed" in meta or "finals" not in meta or not (meta_path.parent / "image.png").exists():
             continue
-        if arm not in ("unguided", "stage1_sar") and not (arm.startswith("abl_") or arm == "stage1"):
+        if arm not in ("unguided", "stage1_sar") and not arm.startswith("abl_"):
             continue
         program = translate(meta["prompt"])
         for f in meta["finals"]:
