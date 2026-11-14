@@ -178,11 +178,15 @@ def test_sar_without_consistency_check_keeps_every_prior_but_keeps_the_final_che
 
 
 def test_ablation_table_arms_run_stage1_before_stage2():
-    arms = list(ABLATION_TABLE_ARMS)
-    assert arms.index("stage1") < min(arms.index(a) for a in arms if a in STAGE2_MODES)
+    from run_experiment import ABLATION_RUN_ARMS, STAGE1_OF
+    arms = list(ABLATION_RUN_ARMS)
+    for a in arms:                          # every Stage 2 arm runs after the Stage 1 arm it starts from
+        if a in STAGE2_MODES:
+            assert arms.index(STAGE1_OF.get(a, "stage1")) < arms.index(a), a
     assert set(ABLATION_ARMS) <= set(arms) and "stage1_sar_nocheck" in STAGE2_MODES
+    assert set(ABLATION_TABLE_ARMS) | {"stage1_off"} == set(arms)
     for spec in ABLATION_ARMS.values():
-        assert set(spec) <= {"cfg", "state", "measure"} and len(spec) == 1
+        assert spec and set(spec) <= {"cfg", "state", "measure", "extra_steps"}
     from annotate import ABLATION_ARM_NAMES
     assert set(ABLATION_ARM_NAMES) == set(ABLATION_TABLE_ARMS)
 

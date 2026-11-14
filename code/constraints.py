@@ -65,6 +65,12 @@ class StepState:
     size_bounds: Dict[int, tuple] = field(default_factory=dict)
     target: str = "interval"                # ablations: "point" (interval center) or "one_sided" (mu >= l)
     loss: str = "charbonnier"
+    # Tab. full ablations (Stage 1); the defaults are the method
+    kappa_scale: float = 1.0                # hard interval: kappa -> kappa * kappa_scale (1e-3 approximates kappa -> 0)
+    no_guide: tuple = ()                    # families scored but given weight 0, e.g. ("presence",): w/o presence terms
+    domain_off: bool = False                # w/o the domain gate: phi is used outside E as it is (linear extrapolation)
+    size_margin: bool = True                # False: the direction regime asks m > 0 instead of m >= c_0.95
+    support_off: bool = False               # w/o support / reliability gates and the psi weight
     # degree families the frozen support manifest does not mark "degree-guided": scored, never guided
     no_degree: frozenset = frozenset()
 
@@ -148,6 +154,8 @@ def _presence_gate(c, evidence, state):
 
 
 def _support_gate(q, evidence, state):
+    if state.support_off:
+        return True
     obj = evidence.objects.get(q)
     return obj is not None and float(obj["A"].detach()) >= state.a_min and float(obj["psi"]) >= state.psi_min
 
@@ -310,7 +318,8 @@ class Size(Scorer):
             c68, c95 = calib.size_quantiles({"A_q": objs[0]["A"], "A_r": objs[1]["A"]} if areas else None)
             regime = size_regime(low, high, c68, c95)
             width = math.sqrt(kappa ** 2 + c68 ** 2)
-            low, high, kappa = (low, high, width) if regime == "graded" else (c95, math.inf, width)
+            floor = c95 if state.size_margin else 0.0
+            low, high, kappa = (low, high, width) if regime == "graded" else (floor, math.inf, width)
             if all(gates.values()):
                 state.size_regime[cid], state.size_bounds[cid] = regime, (low, high, kappa)
         if regime == "unmeasurable":
@@ -403,6 +412,10 @@ def scorer_for(c: Constraint) -> Optional[Scorer]:
     return FAMILY_SCORERS.get(c.family)
 
 
+def _finite(raw):
+    return raw is not None and bool(torch.isfinite(torch.as_tensor(raw).detach()))
+
+
 def _inside(raw, lo, hi):
     if raw is None:
         return False
@@ -429,17 +442,19 @@ def freeze_step(program, evidence, calib, bin, state: StepState, targets=None) -
                 gates["manifest"] = False
             raw = sc.raw(c, evidence, component)
             lo, hi = sc.domain(c, calib, bin, component)
-            gates["domain"] = _inside(raw, lo, hi)
+            gates["domain"] = _inside(raw, lo, hi) if not state.domain_off else _finite(raw)
             low, high, kappa = sc.resolve(cid, c, evidence, calib, state, *sc.interval(c, calib, component), gates)
             low, high = ablated_target(c, component, low, high, state.target)
+            kappa = kappa * state.kappa_scale
             if targets and cid in targets:
                 low, high = targets[cid]
             weight = 0.0
-            if all(gates.values()):
-                dom = domain_weight(torch.as_tensor(raw).detach(), lo, hi, state.band) if sc.tapered(component) else 1.0
+            if all(gates.values()) and c.family not in state.no_guide:
+                taper = sc.tapered(component) and not state.domain_off
+                dom = domain_weight(torch.as_tensor(raw).detach(), lo, hi, state.band) if taper else 1.0
                 since = state.first_valid[c.family]
                 ramp = 1.0 if since == state.first_step else ramp_weight(state.step - since, state.ramp)
-                weight = state.lam * dom * ramp * _support_weight(c, evidence)
+                weight = state.lam * dom * ramp * (1.0 if state.support_off else _support_weight(c, evidence))
             out.append(Frozen(c, cid, c.tier, bin, float(weight), low, high, kappa, gates, component, state.loss))
     return out
 

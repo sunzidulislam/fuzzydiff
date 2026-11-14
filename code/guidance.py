@@ -7,6 +7,7 @@ only if it passes the domain and loss tests under that same frozen set.
 """
 from __future__ import annotations
 
+import copy
 import os
 import sys
 from dataclasses import dataclass, field
@@ -44,6 +45,13 @@ class GuideCfg:
     acceptance: bool = True                 # False: the first candidate is taken unchecked
     cond_x0: bool = False                   # True: evidence on the conditional clean prediction, not the CFG one
     clip: str = "peak"                      # dmax limits the largest latent change ("peak") or its RMS ("rms")
+    # Tab. full ablations (Stage 1); the defaults are the method
+    grad_branch: str = "cfg"                # "cond": the evidence keeps the CFG value, the gradient flows only
+                                            # through the conditional branch
+    projection_space: str = "latent"        # "image": priority projection coefficients from image-space gradients
+    accept_refreeze: bool = False           # acceptance re-freezes the active set at the candidate
+    accept_tier2: bool = True               # False: acceptance checks tier 1 and the total, not tier 2
+    trace_unguided: bool = False            # unguided run that still reads attention traces in the window (for SAR)
 
 
 @dataclass
@@ -111,6 +119,41 @@ def project_tier(g, higher: List[torch.Tensor]):
     return best.reshape(shape).to(g.dtype)
 
 
+def projection_coefficients(g, higher: List[torch.Tensor]) -> List[float]:
+    """The c of project_tier's solution d = g - sum_i c_i higher_i (zeros where a higher gradient vanishes)."""
+    v = g.reshape(-1).double()
+    keep = [i for i, a in enumerate(higher) if _dot(a, a) > 0]
+    cols = [higher[i].reshape(-1).double() for i in keep]
+    coeffs = [0.0] * len(higher)
+    if not cols:
+        return coeffs
+    candidates = [(v, [0.0] * len(cols))]
+    for j, a in enumerate(cols):
+        c = float((v @ a) / (a @ a))
+        candidates.append((v - c * a, [c if k == j else 0.0 for k in range(len(cols))]))
+    if len(cols) == 2:
+        A = torch.stack(cols, dim=1)
+        c = (torch.linalg.pinv((A.T @ A).cpu()).to(A.device) @ (A.T @ v))
+        candidates.append((v - A @ c, [float(x) for x in c]))
+    tol = 1e-9 * float(v.norm().clamp_min(1.0))
+    feasible = [(d, c) for d, c in candidates if all(float(d @ a) >= -tol * float(a.norm()) for a in cols)]
+    _, best = min(feasible, key=lambda t: float((v - t[0]).norm()))
+    for i, c in zip(keep, best):
+        coeffs[i] = c
+    return coeffs
+
+
+def project_via_image(g_lat, g_img, higher_lat, higher_img):
+    """Image-space projection ablation: the priority projection is solved on image-space gradients, and the
+    same combination of tier gradients is taken in the latent."""
+    coeffs = projection_coefficients(g_img, higher_img)
+    out = g_lat.double()
+    for c, h in zip(coeffs, higher_lat):
+        if c:
+            out = out - c * h.double()
+    return out.to(g_lat.dtype)
+
+
 def bounded_step(z, g, loss, cfg: GuideCfg):
     """Eq. stable_guided_step. Returns the candidate and the step size actually used."""
     L = float(loss)
@@ -151,7 +194,10 @@ def _constraint_losses(frozen, evidence, calib):
 
 def _measure(ctx, z, sigma, b, readout):
     out = ctx.backend.velocity(z, sigma, ctx.cond, readout=readout, cfg=ctx.cfg.cfg)
-    x0 = ctx.backend.decode(ctx.backend.clean(z, sigma, out.v_cond if ctx.cfg.cond_x0 else out.v))
+    v = out.v_cond if ctx.cfg.cond_x0 else out.v
+    if ctx.cfg.grad_branch == "cond" and torch.is_grad_enabled():
+        v = v.detach() + (out.v_cond - out.v_cond.detach())     # same value, gradient through v_cond only
+    x0 = ctx.backend.decode(ctx.backend.clean(z, sigma, v))
     return out, ctx.measure(ctx.backend, x0, out, ctx.program, b)
 
 
@@ -189,13 +235,18 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
         del out, evidence
     else:
         tiers = sorted(losses)
-        raw = {}
+        raw, img = {}, {}
+        image_space = cfg.projection_space == "image" and evidence.x0 is not None and evidence.x0.requires_grad
         for k, m in enumerate(tiers):
             if not losses[m].requires_grad:
                 raw[m] = torch.zeros_like(leaf)     # e.g. a term whose evidence has no path to the latent
+                img[m] = torch.zeros_like(evidence.x0) if image_space else None
                 continue
-            g, = torch.autograd.grad(losses[m], leaf, retain_graph=k < len(tiers) - 1, allow_unused=True)
-            raw[m] = torch.zeros_like(leaf) if g is None else g
+            wrt = [leaf, evidence.x0] if image_space else [leaf]
+            grads = torch.autograd.grad(losses[m], wrt, retain_graph=k < len(tiers) - 1, allow_unused=True)
+            raw[m] = torch.zeros_like(leaf) if grads[0] is None else grads[0]
+            if image_space:
+                img[m] = torch.zeros_like(evidence.x0) if grads[1] is None else grads[1]
         total = sum(losses.values()).detach()
         del out, losses, evidence                   # free the graph before the candidate passes
         finite = all(torch.isfinite(raw[m]).all() for m in tiers)
@@ -206,7 +257,13 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
                     if a < c and raw[a].norm() > 0 and raw[c].norm() > 0:
                         cos[f"{a}-{c}"] = float(_dot(raw[a], raw[c]) / (raw[a].double().norm() * raw[c].double().norm()))
             for m in tiers:
-                projected = project_tier(raw[m], [raw[h] for h in tiers if h < m]) if cfg.priority else raw[m]
+                higher = [h for h in tiers if h < m]
+                if not cfg.priority:
+                    projected = raw[m]
+                elif image_space:
+                    projected = project_via_image(raw[m], img[m], [raw[h] for h in higher], [img[h] for h in higher])
+                else:
+                    projected = project_tier(raw[m], [raw[h] for h in higher])
                 norm = raw[m].double().norm()
                 removed[str(m)] = float(1 - projected.double().norm() / norm) if norm > 0 else 0.0
                 g = g + projected
@@ -230,7 +287,7 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
                 candidate = z - eta * direction
                 with torch.no_grad():
                     out_c, ev_c = _measure(ctx, candidate, sigma, b, readout)
-                reason = _reject_reason(frozen, ev_c, ctx.calib, before, cfg) if cfg.acceptance else None
+                reason = _reject_reason(frozen, ev_c, ctx.calib, before, cfg, ctx, b) if cfg.acceptance else None
                 if reason is None:
                     accepted, z_used, v_used, used_evidence = True, candidate, out_c.v.detach(), _light_evidence(ev_c)
                     after = _floats(tier_losses(frozen, ev_c, ctx.calib))
@@ -246,13 +303,20 @@ def guided_step(z, sigma, sigma_next, step, ctx: Stage1Ctx) -> StepOut:
                    used_evidence)
 
 
-def _reject_reason(frozen, evidence, calib, before, cfg):
-    """Domain first, so no domain-limited function sees an uncalibrated input (App. "Acceptance")."""
-    for f in frozen:
-        if f.weight > 0 and not in_domain(f, evidence, calib):
-            return "domain"
-    now = _floats(tier_losses(frozen, evidence, calib))
-    for m in ((1, 2) if cfg.priority else ()):
+def _reject_reason(frozen, evidence, calib, before, cfg, ctx=None, b=None):
+    """Domain first, so no domain-limited function sees an uncalibrated input (App. "Acceptance").
+    Ablations: accept_refreeze judges the candidate on the active set re-frozen at the candidate instead of the
+    step's frozen set; accept_tier2=False drops the tier-2 condition; a run without the domain gate skips it."""
+    if ctx is None or not ctx.state.domain_off:
+        for f in frozen:
+            if f.weight > 0 and not in_domain(f, evidence, calib):
+                return "domain"
+    judged = frozen
+    if cfg.accept_refreeze and ctx is not None:
+        judged = freeze_step(ctx.program, evidence, calib, b, copy.deepcopy(ctx.state), ctx.targets)
+    now = _floats(tier_losses(judged, evidence, calib))
+    tiers = (1, 2) if cfg.accept_tier2 else (1,)
+    for m in (tiers if cfg.priority else ()):
         key = str(m)
         if key in before and now.get(key, 0.0) > before[key] + cfg.eps.get(m, 0.0):
             return f"tier{m}"
@@ -359,7 +423,11 @@ def run_stage1(backend, program, cond, seed, calib, measure, cfg: GuideCfg, log,
             _accumulate_trace(sums, counts, out.evidence)
         else:
             with torch.no_grad():
-                if cfg.log_all:
+                if cfg.trace_unguided and cfg.sigma_lo <= float(sigma) <= cfg.sigma_hi:
+                    out_u, ev_u = _measure(ctx, z, sigma, _bin(sigma), bool(cond.phrase_tokens))
+                    _accumulate_trace(sums, counts, ev_u)       # traces for SAR, the step itself unguided
+                    v = out_u.v
+                elif cfg.log_all:
                     v = _log_unguided_step(ctx, z, sigma, i)
                 else:
                     v = backend.velocity(z, sigma, cond, cfg=cfg.cfg).v

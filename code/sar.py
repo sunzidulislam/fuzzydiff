@@ -7,6 +7,7 @@ rolled back, and an output that fails the final check is replaced by the Stage-1
 """
 from __future__ import annotations
 
+import dataclasses
 import math
 import os
 import sys
@@ -40,6 +41,13 @@ class SarCfg:
     confidence: bool = False
     competition: bool = False
     consistency: bool = True                # False: the ablation keeps every prior for all K steps (final check stays)
+    # Tab. full ablations (Stage 2); the defaults are the method
+    prior: str = "product"                  # "attention": M_q is the Stage-1 attention trace alone
+    competition_all: bool = False           # competition between every pair of objects, whatever their relation
+    drift_ref: str = "support"              # "prior": the drift check compares against M_q (the old check)
+    lagged: bool = False                    # the check reads the previous step's SAR-modified x0, not this step's
+    post_softmax: bool = False              # r multiplies the attention probabilities after the softmax, unnormalized
+    time_factor: int = 1                    # plain img2img with time_factor x K steps over the same noise range
 
 
 @dataclass
@@ -101,14 +109,21 @@ def build_priors(traces, supports, cfg: SarCfg, presence=None, relations=None) -
         if head in supports:
             s = supports[head]
             aligned[q] = s
-            priors[q] = torch.sqrt(_resize(trace.to(s.dtype), s.shape).clamp_min(0) * s.clamp_min(0))
+            t = _resize(trace.to(s.dtype), s.shape).clamp_min(0)
+            if cfg.prior == "attention":
+                priors[q] = t / t.max().clamp_min(1e-12)        # attention-only prior, scaled to [0, 1]
+            else:
+                priors[q] = torch.sqrt(t * s.clamp_min(0))
     if not cfg.competition:
         return priors
     competed = {}
     for q, m in priors.items():
-        group = [r for r in priors if r != q and _relation(relations, q, r) == "exclusive"
-                 and soft_iou(aligned[q], aligned[r]) < cfg.overlap
-                 and _overlap_coefficient(aligned[q], aligned[r]) < cfg.nest]
+        if cfg.competition_all:
+            group = [r for r in priors if r != q]
+        else:
+            group = [r for r in priors if r != q and _relation(relations, q, r) == "exclusive"
+                     and soft_iou(aligned[q], aligned[r]) < cfg.overlap
+                     and _overlap_coefficient(aligned[q], aligned[r]) < cfg.nest]
         if group:
             stack = torch.stack([m] + [priors[r] for r in group]) / cfg.temp
             competed[q] = m * torch.softmax(stack, dim=0)[0]
@@ -205,8 +220,14 @@ def _no_op_reason(objects_ok, priors, out, cond):
 def run_stage2(backend, stage1, cond, program, prompt, calib, seg, cfg: SarCfg, seed, log, mode="sar", measure=None,
                steps=28, priors=None) -> Stage2Out:
     """mode "sar" or "plain". All modes share the re-noising, so arms differ only in the bias."""
+    backend.sar_post_softmax = cfg.post_softmax         # read by the attention processors; reset at the end
     sigmas = backend.sigmas(steps)
     start = steps - cfg.k
+    if cfg.time_factor != 1:                # time-matched plain pass: each step of the same noise range split in f
+        f, sub = cfg.time_factor, sigmas[start:]
+        sigmas = torch.cat([torch.cat([torch.linspace(float(a), float(b), f + 1, dtype=sub.dtype)[:-1]
+                                       for a, b in zip(sub[:-1], sub[1:])]), sub[-1:]])
+        start, cfg = 0, dataclasses.replace(cfg, k=cfg.k * f, time_factor=1)
     noise = backend.noise_like_latent(1_000_003 + seed)
     latent0 = backend.encode(stage1.image)
     z = (1 - sigmas[start].to(latent0.dtype)) * latent0 + sigmas[start].to(latent0.dtype) * noise
@@ -228,7 +249,10 @@ def run_stage2(backend, stage1, cond, program, prompt, calib, seg, cfg: SarCfg, 
     all_priors.update({a: object_priors[q] for a, q in attr_of.items() if q in object_priors})
     alpha, beta, weak = _strengths(cfg, object_priors, attr_of, stage1.traces, stage1.supports, stage1.presence)
 
-    refs = {q: stage1.supports[q.split("#")[0]] for q in object_priors}
+    if cfg.drift_ref == "prior":            # old check: drift measured against the prior M_q, scaled to [0, 1]
+        refs = {q: m / m.max().clamp_min(1e-12) for q, m in object_priors.items()}
+    else:
+        refs = {q: stage1.supports[q.split("#")[0]] for q in object_priors}
     enabled = set()
     for q, ref in refs.items():
         if calib.drift_thresholds(stratum(area(ref))) is None:
@@ -251,6 +275,7 @@ def run_stage2(backend, stage1, cond, program, prompt, calib, seg, cfg: SarCfg, 
         return bad
 
     previous_q: Set[str] = set()
+    lagged_x = None
     z0_next = None
     for k in range(cfg.k):
         i = start + k
@@ -268,7 +293,10 @@ def run_stage2(backend, stage1, cond, program, prompt, calib, seg, cfg: SarCfg, 
             elif enabled and not cfg.consistency:
                 q_k = set(enabled)
             elif enabled:
-                x_hat = backend.decode(backend.clean(z, sigma, first.v))
+                if cfg.lagged and lagged_x is not None:      # ablation: last step's SAR-modified prediction
+                    x_hat = lagged_x
+                else:
+                    x_hat = backend.decode(backend.clean(z, sigma, first.v))
                 bad = failing(x_hat, enabled)
                 if bad & previous_q:
                     z = z0_next
@@ -294,6 +322,8 @@ def run_stage2(backend, stage1, cond, program, prompt, calib, seg, cfg: SarCfg, 
         step = (sigma_next - sigma).to(z.device, z.dtype)
         z0_next = z + step * first.v
         out.sar_free.append(z0_next.clone())
+        if cfg.lagged:
+            lagged_x = backend.decode(backend.clean(z, sigma, v)) if q_k else None
         z = z + step * v
         previous_q = q_k
         out.bias_steps += bool(q_k)
@@ -316,4 +346,5 @@ def run_stage2(backend, stage1, cond, program, prompt, calib, seg, cfg: SarCfg, 
               fallback_reason=out.fallback_reason, rollbacks=out.rollbacks, disabled=sorted(out.disabled),
               fallback_objects=sorted(out.fallback_objects), suspended_steps=out.suspended_steps, passes=out.passes,
               bias_steps=out.bias_steps, no_op_reason=out.no_op_reason)
+    backend.sar_post_softmax = False
     return out

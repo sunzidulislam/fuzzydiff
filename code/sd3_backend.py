@@ -185,6 +185,7 @@ class Backend:
             p.valid_text = list(valid_text) if (p.readout and valid_text is not None) else None
             p.readout_batch = 0
             p.sar_log_r = sar_log_r if (sar_log_r is not None and i in self.sar_blocks) else None
+            p.sar_post_softmax = getattr(self, "sar_post_softmax", False)    # Stage-2 ablation
             p.sar_batch = [0]
             p.maps, p.shares, p.text_mass = {}, {}, None
 

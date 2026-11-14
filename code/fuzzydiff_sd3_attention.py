@@ -191,7 +191,13 @@ class FuzzyJointAttnProcessor:
                 self.text_mass = res[-1]
 
         # ---- attention output (fused kernel; same call as stock when mask is None) ----
-        if mask is None:
+        if mask is not None and getattr(self, "sar_post_softmax", False):
+            # ablation: r multiplies the image-to-text probabilities after the softmax, with no renormalization
+            hidden_states = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0, is_causal=False)
+            for b in self.sar_batch:
+                hidden_states[b] = _post_softmax_output(query[b], key[b], value[b], n_img, scale,
+                                                        self.sar_log_r.to(query.dtype), self.chunk)
+        elif mask is None:
             hidden_states = F.scaled_dot_product_attention(query, key, value, dropout_p=0.0, is_causal=False)
         else:
             hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask=mask, dropout_p=0.0, is_causal=False)
@@ -210,6 +216,21 @@ class FuzzyJointAttnProcessor:
         if encoder_hidden_states is not None:
             return hidden_states, encoder_hidden_states
         return hidden_states
+
+
+def _post_softmax_output(q, k, v, n_img, scale, log_r, chunk=1024):
+    """[H, N, D] output with A_ij = softmax_j(q_i k_j^T scale) * r_ij on (image query, text key) pairs, not
+    renormalized; text queries are unchanged. Chunked over queries to bound memory."""
+    r = log_r.exp()                                         # [N_I, N_T]
+    out = []
+    for s in range(0, q.shape[1], chunk):
+        a = torch.softmax((q[:, s:s + chunk] @ k.transpose(-1, -2)) * scale, dim=-1)   # [H, c, N]
+        rows = torch.arange(s, min(s + chunk, q.shape[1]), device=q.device)
+        img_rows = rows < n_img
+        if img_rows.any():
+            a[:, img_rows, n_img:] = a[:, img_rows, n_img:] * r[rows[img_rows]].to(a.dtype)
+        out.append(a @ v)
+    return torch.cat(out, dim=1)
 
 
 def sar_log_multiplier(prior_img: torch.Tensor, text_idx_by_phrase: Dict[str, List[int]],

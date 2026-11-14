@@ -146,8 +146,9 @@ document.getElementById("export").onclick=function(){
 
 def _blind_groups(out_dir, out: Path, seed: int, arms, tag, panel_controls, extra=None):
     """One section per prompt, arms in shuffled panels, the prompt shown and the arm hidden. Writes the key."""
-    if len(arms) > len(string.ascii_uppercase):
-        raise ValueError(f"{len(arms)} arms, but panels are lettered A to Z")
+    letters = list(string.ascii_uppercase) + [a + b for a in string.ascii_uppercase for b in string.ascii_uppercase]
+    if len(arms) > len(letters):
+        raise ValueError(f"{len(arms)} arms, but panels are lettered A to ZZ")
     out_dir = Path(out_dir)
     rng = random.Random(seed)
     per_image = {}
@@ -166,7 +167,7 @@ def _blind_groups(out_dir, out: Path, seed: int, arms, tag, panel_controls, extr
         rng.shuffle(order)
         key[group] = {"prompt": prompt, "panels": {}, **(extra(prompt) if extra else {})}
         panels = []
-        for letter, arm in zip(string.ascii_uppercase, order):
+        for letter, arm in zip(letters, order):
             key[group]["panels"][letter] = arm
             panels.append(f'<figure data-panel="{letter}" data-group="{group}"><figcaption>{letter}</figcaption>'
                           f'<img alt="panel {letter}" src="data:image/jpeg;base64,{_encode(found[arm])}">'
@@ -458,28 +459,51 @@ def score_mixture(ratings: Path, key: Path, field: str = "leakage", comparisons=
 ABLATION_ROWS = (("unguided", "SD3, no guidance"), ("stage1", "Stage~1 (full)"),
                  ("abl_point", "\\quad point target at interval center"),
                  ("abl_one_sided", "\\quad one-sided (``more is better'')"),
+                 ("abl_hard_interval", "\\quad hard interval ($\\kappa\\to0$)"),
+                 ("abl_no_presence", "\\quad w/o presence terms"),
                  ("abl_attention_only", "\\quad attention-only evidence"),
                  ("abl_overlap", "\\quad overlap $b$ instead of contrastive $\\beta$"),
                  (None, "\\quad w/o gradient-validity gate"),
                  ("abl_cond_x0", "\\quad conditional $\\hat x_0$ (not CFG)"),
+                 ("abl_cond_branch", "\\quad cond.-branch gradient only"),
                  (None, "\\quad w/o noise-bin validity gates"),
+                 ("abl_global_presence", "\\quad global-only presence"),
                  ("abl_floored", "\\quad floored log loss (saturating)"),
                  ("abl_weighted_sum", "\\quad weighted sum (no priority)"),
+                 ("abl_image_projection", "\\quad image-space projection"),
                  ("abl_no_acceptance", "\\quad w/o acceptance test"),
+                 ("abl_accept_refreeze", "\\quad acceptance w/o frozen set"),
+                 ("abl_accept_no_tier2", "\\quad acceptance w/o tier-2 condition"),
                  ("abl_no_backtrack", "\\quad w/o backtracking"),
                  ("abl_hard_domain", "\\quad hard domain gate (no smooth weight/ramp)"),
+                 ("abl_linear_domain", "\\quad linear extrapolation outside $\\mathcal{E}$"),
+                 ("abl_no_tau_min", "\\quad relative text share only (no $\\tau_{\\min}$)"),
+                 ("abl_size_no_margin", "\\quad size direction at $m>0$ (no $c_{0.95}$ margin)"),
+                 ("abl_no_core", "\\quad w/o core support / reliability gates"),
                  ("abl_no_satisfaction", "\\quad w/o satisfaction gating ($\\delta\\to0$)"),
+                 (None, "\\quad constant $c(\\sigma_t)$"),
+                 (None, "\\quad heuristic instead of calibrated $I_{h,r}$"),
                  ("stage1_plain", "S1 + plain SD3 img2img"), ("stage1_sar", "S1 + SAR (logit bias, ours)"),
-                 ("stage1_placebo", "S1 + SAR, placebo priors"),
+                 ("stage1_sar_attn_prior", "S1 + SAR, attention-only prior"),
+                 ("stage1_placebo", "S1 + SAR, placebo priors (other image)"),
+                 ("stage1_plain_tm", "S1 + plain img2img, time-matched ($K'$ steps)"),
+                 ("abl_s1_extra", "S1 with extra guided steps, time-matched"),
+                 ("stage1_sar", "S1 + SAR, minimal form (default)"),
                  ("stage1_sar_conf", "\\quad + confidence scaling $\\gamma_q$"),
                  ("stage1_sar_comp", "\\quad + competition (exclusive pairs)"),
-                 ("stage1_sar_nocheck", "S1 + SAR w/o consistency check"))
-ABLATION_ARM_NAMES = tuple(a for a, _ in ABLATION_ROWS if a)
+                 ("stage1_sar_comp_all", "S1 + SAR, competition for all pairs"),
+                 ("stage1_sar_nocheck", "S1 + SAR w/o consistency check"),
+                 ("stage1_sar_drift_prior", "S1 + SAR, drift vs.\\ prior $M_q$ (old check)"),
+                 ("stage1_sar_lagged", "S1 + SAR, lagged check on SAR-modified $\\hat x_0$"),
+                 ("stage1_sar_post", "S1 + SAR (post-softmax, unnorm.)"),
+                 ("sd3_sar", "SD3 + SAR (no fuzzy guid.)"))
+ABLATION_ARM_NAMES = tuple(dict.fromkeys(a for a, _ in ABLATION_ROWS if a))
 ABLATION_COMPARISONS = (("stage1", "unguided"),
                         *((a, "stage1") for a in ABLATION_ARM_NAMES if a.startswith("abl_")),
                         ("stage1_plain", "stage1"), ("stage1_sar", "stage1"), ("stage1_sar", "stage1_plain"),
-                        ("stage1_placebo", "stage1_sar"), ("stage1_sar_conf", "stage1_sar"),
-                        ("stage1_sar_comp", "stage1_sar"), ("stage1_sar_nocheck", "stage1_sar"))
+                        *((a, "stage1_sar") for a in ABLATION_ARM_NAMES
+                          if a.startswith("stage1_sar_") or a == "stage1_placebo"),
+                        ("stage1_plain_tm", "stage1_plain"), ("sd3_sar", "unguided"))
 
 
 def _size_question(prompt):
@@ -530,7 +554,7 @@ def ablation_table_rows(mixture=None, size=None) -> str:
         if arm == "stage1_plain":
             lines.append("\\midrule")
         if arm is None:
-            lines.append(f"{label} & \\multicolumn{{6}}{{c}}{{= Stage~1 (no such gate in provisional calibration)}}\\\\")
+            lines.append(f"{label} & \\multicolumn{{6}}{{c}}{{= Stage~1 under the provisional calibration}}\\\\")
             continue
         cells = []
         for scores, name in ((mixture, "leakage"), (size, "size_violation")):

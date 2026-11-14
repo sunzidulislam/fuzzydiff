@@ -591,7 +591,7 @@ def test_ablation_scores_compare_each_ablation_with_stage1_and_fill_the_table():
         rows = ablation_table_rows(mixture=r).splitlines()
         floored = next(x for x in rows if "floored" in x)
         assert floored.startswith(r"\quad floored") and r"& 100.0 & 0.0 & 60.0 & \tbd" in floored
-        assert sum("multicolumn" in x for x in rows) == 2 and rows.count(r"\midrule") == 1
+        assert sum("multicolumn" in x for x in rows) == 4 and rows.count(r"\midrule") == 1   # rows = Stage 1
     with_tmp(body)
 
 

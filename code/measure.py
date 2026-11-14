@@ -18,7 +18,7 @@ from constraints import Evidence, mix_key  # noqa: E402
 from estimators import area, centroid, exclusive_core, extent, object_photometric, region_crop, scene_lightness  # noqa: E402
 from grounding import aggregate_maps, binding, binding_keys, overlap  # noqa: E402
 
-MEASURE_ABLATIONS = ("attention_only", "overlap")
+MEASURE_ABLATIONS = ("attention_only", "overlap", "global_only", "no_tau_min", "no_core")
 WHITENESS_CHROMA = 0.04          # OKLab chroma at which F4 whiteness falls to 1/e of the lightness
 
 
@@ -42,7 +42,10 @@ class Measure:
         """ablation "attention_only": supports are the phrase attention maps instead of CLIPSeg, wherever a
         backbone pass gives maps; a finished image has none (out is None) and is scored with CLIPSeg like
         every other arm, so the arms' final scores are comparable;
-        "overlap": binding is the plain overlap b(a, q) instead of the contrastive beta(a, q)."""
+        "overlap": binding is the plain overlap b(a, q) instead of the contrastive beta(a, q);
+        "global_only": presence from the global SigLIP logit alone (the region logit replaced by the global one);
+        "no_tau_min": a phrase map is informative on peak and relative text share alone (tau_min = 0);
+        "no_core": photometric and colour statistics over the whole support S_q, not its exclusive core."""
         if ablation and ablation not in MEASURE_ABLATIONS:
             raise ValueError(f"unknown measurement ablation {ablation!r}")
         self.deps, self.prompt, self.cond, self.ablation = deps, prompt, cond, ablation
@@ -89,9 +92,10 @@ class Measure:
             s = supports[q]
             region = region_crop(x, s, self.box_k)
             g, r = d.siglip.logits(x, region, q)
-            h = d.calib.presence_logit(bin, g, r)
+            h = d.calib.presence_logit(bin, g, g if self.ablation == "global_only" else r)
             others = [supports[r] for r in objects if r != q]
-            core = exclusive_core(s, others, self.erode, self.core_threshold, self.core_temp)
+            core = s if self.ablation == "no_core" else exclusive_core(s, others, self.erode, self.core_threshold,
+                                                                           self.core_temp)
             ev.objects[q] = {"S": s, "core": core, "A": area(s), "c": centroid(s), "h": h,
                              "g": g.detach(), "r": r.detach(),
                              "p": torch.sigmoid(h.detach()), "psi": d.calib.psi(q, {})}
@@ -153,7 +157,8 @@ class Measure:
 
     def _grounded(self, out):
         blocks = sorted(next(iter(out.maps.values())))
-        return aggregate_maps(out, self.cond, blocks, self.deps.calib.attention_thresholds("objects"))
+        kappa_pk, m_min, tau_min = self.deps.calib.attention_thresholds("objects")
+        return aggregate_maps(out, self.cond, blocks, (kappa_pk, m_min, 0.0 if self.ablation == "no_tau_min" else tau_min))
 
     def _attention_supports(self, x, objects, grounded):
         """Attention-only ablation: each object's normalized phrase map on the segmenter's grid.

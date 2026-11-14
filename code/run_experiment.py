@@ -54,15 +54,22 @@ COMMANDED = {"darker": -1, "brighter": +1}
 TARGET_BAND = 0.02
 UNGUIDED_ARMS = {"unguided", "ladder_unguided", "prompt_weight", "unguided_neg"}
 STAGE2_MODES = {"stage1_plain": "plain", "stage1_sar": "sar", "stage1_placebo": "sar", "stage1_sar_nocheck": "sar",
-                "stage1_sar_neg": "sar", "stage1_sar_conf": "sar", "stage1_sar_comp": "sar"}
+                "stage1_sar_neg": "sar", "stage1_sar_conf": "sar", "stage1_sar_comp": "sar",
+                "stage1_sar_attn_prior": "sar", "stage1_plain_tm": "plain", "stage1_sar_comp_all": "sar",
+                "stage1_sar_drift_prior": "sar", "stage1_sar_lagged": "sar", "stage1_sar_post": "sar", "sd3_sar": "sar"}
 # Stage 2 ablations: the SarCfg fields each arm changes (stage1_sar is the minimal form, both off)
 SAR_ARMS = {"stage1_sar_nocheck": {"consistency": False}, "stage1_sar_conf": {"confidence": True},
-            "stage1_sar_comp": {"competition": True}}
+            "stage1_sar_comp": {"competition": True},
+            "stage1_sar_attn_prior": {"prior": "attention"},
+            "stage1_plain_tm": {"time_factor": 2},          # SAR makes two passes per biased step: 2K plain steps
+            "stage1_sar_comp_all": {"competition": True, "competition_all": True},
+            "stage1_sar_drift_prior": {"drift_ref": "prior"}, "stage1_sar_lagged": {"lagged": True},
+            "stage1_sar_post": {"post_softmax": True}}
 # Arms with the negative prompt derived from the program (negative.py). unguided_neg is the control:
 # SD3 with the same negative prompt, so a gain of the method is not the negative prompt alone.
 NEGATIVE_ARMS = {"unguided_neg", "stage1_neg", "stage1_sar_neg"}
-STAGE1_OF = {"stage1_sar_neg": "stage1_neg"}        # Stage 2 arms start from this Stage 1 arm (default stage1)
-STAGE1_ARMS = {"stage1", "stage1_neg"}
+STAGE1_OF = {"stage1_sar_neg": "stage1_neg", "sd3_sar": "stage1_off"}   # Stage 2 arms start from this Stage 1 arm
+STAGE1_ARMS = {"stage1", "stage1_neg", "stage1_off"}
 COMPARISON_ARMS = ("stage1", "stage1_plain", "stage1_sar", "stage1_placebo")
 # Tab. ablation: each Stage-1 arm changes one component. Values are GuideCfg fields, StepState fields
 # (state_kw), or the Measure ablation. "w/o gradient-validity gate" and "w/o noise-bin validity gates" have
@@ -81,9 +88,28 @@ ABLATION_ARMS = {
     "abl_hard_domain": {"state": {"band": 0.0, "ramp": 0}},
     # w/o satisfaction gating: delta -> 0 makes eta = eta0 c(sigma) L / (L + delta) constant while L > 0
     "abl_no_satisfaction": {"cfg": {"delta": 1e-12}},
+    "abl_hard_interval": {"state": {"kappa_scale": 1e-3}},          # kappa -> 0
+    "abl_no_presence": {"state": {"no_guide": ("presence",)}},
+    "abl_cond_branch": {"cfg": {"grad_branch": "cond"}},
+    "abl_global_presence": {"measure": "global_only"},
+    "abl_image_projection": {"cfg": {"projection_space": "image"}},
+    "abl_accept_refreeze": {"cfg": {"accept_refreeze": True}},
+    "abl_accept_no_tier2": {"cfg": {"accept_tier2": False}},
+    "abl_linear_domain": {"state": {"domain_off": True}},
+    "abl_no_tau_min": {"measure": "no_tau_min"},
+    "abl_size_no_margin": {"state": {"size_margin": False}},
+    "abl_no_core": {"measure": "no_core", "state": {"support_off": True}},
+    # Stage 1 with K more sampler steps (as many as Stage 2 adds), so more of them fall in the guided window
+    "abl_s1_extra": {"extra_steps": "k"},
+    # helper, not a table row: SD3 without guidance that still reads attention traces, for sd3_sar
+    "stage1_off": {"cfg": {"guided": False, "trace_unguided": True}},
 }
-ABLATION_TABLE_ARMS = ("unguided", "stage1", *ABLATION_ARMS, "stage1_plain", "stage1_sar", "stage1_placebo",
-                       "stage1_sar_conf", "stage1_sar_comp", "stage1_sar_nocheck")
+ABLATION_TABLE_ARMS = ("unguided", "stage1", *(a for a in ABLATION_ARMS if a != "stage1_off"), "stage1_plain",
+                       "stage1_sar", "stage1_sar_attn_prior", "stage1_placebo", "stage1_plain_tm", "stage1_sar_conf",
+                       "stage1_sar_comp", "stage1_sar_comp_all", "stage1_sar_nocheck", "stage1_sar_drift_prior",
+                       "stage1_sar_lagged", "stage1_sar_post", "sd3_sar")
+# what --arms ablation runs: the table's arms plus the helper sd3_sar starts from, before it
+ABLATION_RUN_ARMS = (*ABLATION_TABLE_ARMS[:-1], "stage1_off", "sd3_sar")
 # Tab. hedge ladder. prompt_weight is SD3 with the word the hedge modifies weighted by the hedge
 # (A1111-style weights, linear in hedge rank); the hedge stays in the prompt.
 LADDER_ARMS = ("unguided", "prompt_weight", "stage1", "stage1_sar")
@@ -344,6 +370,8 @@ def _execute(job: Job, deps: Deps, out: Path, tmp: Path) -> dict:
     if ablation:
         cfg = dataclasses.replace(cfg, **ablation.get("cfg", {}),
                                   state_kw={**cfg.state_kw, **ablation.get("state", {})})
+        if ablation.get("extra_steps") == "k":
+            cfg = dataclasses.replace(cfg, steps=cfg.steps + deps.sar_cfg.k)
         meta["ablation"] = ablation
     cond = _cond(job, deps)
     if job.arm in NEGATIVE_ARMS:
@@ -670,7 +698,7 @@ def main():
             rows = select_ladders(args.suite, args.group, args.n)
         else:
             rows = select(args.suite, args.group, args.n)
-        arms = {"ablation": list(ABLATION_TABLE_ARMS), "ladder": list(LADDER_ARMS)}.get(args.arms, args.arms.split(","))
+        arms = {"ablation": list(ABLATION_RUN_ARMS), "ladder": list(LADDER_ARMS)}.get(args.arms, args.arms.split(","))
         jobs = arm_jobs(rows, [int(x) for x in args.seeds.split(",")], arms)
         if args.tiny:
             seg, siglip = _tiny_estimators()
