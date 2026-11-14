@@ -197,7 +197,6 @@ def _owl_best(owl, img, texts):
 
 def independent(owl, img, constraint, prototype):
     """The row's measurement on one image (oriented like the constraint), or None."""
-    from color_stats import srgb_to_cielab
     from ladder import _core, _tensor, measure
     family, args, _, quantity, orientation = constraint
     c = translate_constraint(constraint)
@@ -214,8 +213,10 @@ def independent(owl, img, constraint, prototype):
         core = None if box is None else _core(_tensor(img), box)
         if core is None:
             return None
-        lab = srgb_to_cielab(core)
-        return float(lab[0].mean() / 100 * torch.exp(-torch.sqrt(lab[1] ** 2 + lab[2] ** 2).mean() / 10))
+        from color_stats import srgb_to_oklab
+        from measure import WHITENESS_CHROMA
+        mean = srgb_to_oklab(core).reshape(3, -1).mean(dim=1)         # the scorer's definition, in the OWLv2 box core
+        return float(mean[0].clamp(0, 1) * torch.exp(-torch.sqrt(mean[1] ** 2 + mean[2] ** 2) / WHITENESS_CHROMA))
     if family == "F9":
         from constraints import SPATIAL_AXES
         boxes = owl.boxes(img, list(args))
