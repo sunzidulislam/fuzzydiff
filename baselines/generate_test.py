@@ -11,7 +11,9 @@ image id as the SD3 arms, so the rating pages of code/annotate.py show it as one
 its own folder ({out}/soft, {out}/mixture, {out}/size), like the SD3 runs of notebook section 31.
 
 spo: SPO-Diffusion-Models/SPO-SDXL_4k-p_10ep as its model card shows (SDXL, fp16-fix VAE, guidance 5, 50 steps,
-1024 px), as in spo/generate.py. ae: Attend-and-Excite with the authors' published settings on its native backbone,
+1024 px), as in spo/generate.py; spo_refiner: the same with SDXL's native refiner (stable-diffusion-xl-refiner-1.0)
+as an ensemble of experts, base to 80% of the schedule, refiner for the rest. sd1x: plain Stable Diffusion 1.4 at
+512 px (50 steps, guidance 7.5), A&E's backbone without A&E. ae: Attend-and-Excite with the authors' published settings on its native backbone,
 Stable Diffusion 1.4 at 512 px (50 steps, guidance 7.5, max_iter_to_alter 25); the excited tokens are the first
 token of every object noun of the prompt.
 """
@@ -35,6 +37,9 @@ SUITES = ("soft", "mixture", "size")
 SEED = 0
 SPO = {"model": "SPO-Diffusion-Models/SPO-SDXL_4k-p_10ep", "vae": "madebyollin/sdxl-vae-fp16-fix",
        "settings": {"num_inference_steps": 50, "guidance_scale": 5.0, "height": 1024, "width": 1024}}
+SD1X = {"model": "CompVis/stable-diffusion-v1-4",
+        "settings": {"num_inference_steps": 50, "guidance_scale": 7.5, "height": 512, "width": 512}}
+REFINER = {"model": "stabilityai/stable-diffusion-xl-refiner-1.0", "high_noise_frac": 0.8}
 AE = {"model": "CompVis/stable-diffusion-v1-4",
       "settings": {"num_inference_steps": 50, "guidance_scale": 7.5, "max_iter_to_alter": 25, "height": 512, "width": 512}}
 
@@ -64,10 +69,19 @@ def object_token_indices(tokenizer, prompt):
 
 
 def load(method, device):
-    if method == "spo":
+    if method == "sd1x":
+        from diffusers import StableDiffusionPipeline
+        pipe = StableDiffusionPipeline.from_pretrained(SD1X["model"], torch_dtype=torch.float16, safety_checker=None)
+    elif method in ("spo", "spo_refiner"):
         from diffusers import AutoencoderKL, StableDiffusionXLPipeline
         pipe = StableDiffusionXLPipeline.from_pretrained(SPO["model"], torch_dtype=torch.float16)
         pipe.vae = AutoencoderKL.from_pretrained(SPO["vae"], torch_dtype=torch.float16)
+        if method == "spo_refiner":                       # SDXL's own refiner as an ensemble of experts
+            from diffusers import StableDiffusionXLImg2ImgPipeline
+            refiner = StableDiffusionXLImg2ImgPipeline.from_pretrained(
+                REFINER["model"], text_encoder_2=pipe.text_encoder_2, vae=pipe.vae, torch_dtype=torch.float16).to(device)
+            refiner.set_progress_bar_config(disable=True)
+            pipe.refiner = refiner
     else:
         from diffusers import StableDiffusionAttendAndExcitePipeline
         pipe = StableDiffusionAttendAndExcitePipeline.from_pretrained(AE["model"], torch_dtype=torch.float16)
@@ -78,15 +92,24 @@ def load(method, device):
 
 def generate(pipe, method, prompt, device):
     generator = torch.Generator(device).manual_seed(SEED)
+    if method == "sd1x":
+        return pipe(prompt, generator=generator, **SD1X["settings"]).images[0], {}
     if method == "spo":
         return pipe(prompt, generator=generator, **SPO["settings"]).images[0], {}
+    if method == "spo_refiner":
+        frac = REFINER["high_noise_frac"]
+        latents = pipe(prompt, generator=generator, denoising_end=frac, output_type="latent", **SPO["settings"]).images
+        steps = SPO["settings"]["num_inference_steps"]
+        image = pipe.refiner(prompt, image=latents, generator=generator, num_inference_steps=steps,
+                             denoising_start=frac).images[0]
+        return image, {"refiner": REFINER["model"], "high_noise_frac": frac}
     tokens = object_token_indices(pipe.tokenizer, prompt)
     return pipe(prompt, token_indices=tokens, generator=generator, **AE["settings"]).images[0], {"token_indices": tokens}
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--method", choices=("spo", "ae"), required=True)
+    ap.add_argument("--method", choices=("spo", "ae", "sd1x", "spo_refiner"), required=True)
     ap.add_argument("--n", type=int, default=20, help="prompts per setting")
     ap.add_argument("--group", default="test", help="prompt group; test only after the manifest is frozen")
     ap.add_argument("--out", required=True)
@@ -98,7 +121,7 @@ def main():
     if not todo:
         return
     pipe = load(args.method, args.device)
-    spec = SPO if args.method == "spo" else AE
+    spec = {"spo": SPO, "spo_refiner": SPO, "ae": AE, "sd1x": SD1X}[args.method]
     for n, (suite, prompt) in enumerate(todo):
         folder = Path(args.out) / suite / args.method / image_id(prompt, SEED)
         folder.mkdir(parents=True, exist_ok=True)
