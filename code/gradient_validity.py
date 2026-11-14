@@ -201,7 +201,9 @@ def independent(owl, img, constraint, prototype):
     family, args, _, quantity, orientation = constraint
     c = translate_constraint(constraint)
     if family in ("F2a", "F6", "F8"):
-        return measure(_tensor(img), c, owl.boxes(img, list(dict.fromkeys(args))), prototype)
+        y = measure(_tensor(img), c, owl.boxes(img, list(dict.fromkeys(args))), prototype)
+        # F2a comes in CIELAB units (L*, C* about 0-100); /100 puts it on the [0, 1] scale of s, so slopes compare
+        return None if y is None else (y / 100 if family == "F2a" else y)
     if family in ("presence", "F1"):
         return _owl_best(owl, img, [f"a photo of a {args[0]}"])[f"a photo of a {args[0]}"][0]
     if family == "F2b":

@@ -63,13 +63,15 @@ def _meta(out, arm, iid):
     return None if "failed" in m else m
 
 
-def _last_raw(log_path, family, args):
+def _last_raw(log_path, family, cid):
+    """The constraint's raw value at the last logged step (binding has no score on a finished image)."""
     if not Path(log_path).exists():
         return None
     last = None
     for line in open(log_path):
         r = json.loads(line)
-        if r.get("type") == "constraint" and r.get("family") == family and r.get("raw") is not None:
+        if (r.get("type") == "constraint" and r.get("family") == family and r.get("cid") == cid
+                and r.get("component", "main") == "main" and r.get("raw") is not None):
             last = r["raw"]
     return None if last is None else float(last)
 
@@ -89,22 +91,27 @@ def _direction(s, low, high):
 
 
 def _binding_y(owl, img, c, objects, prototype):
-    """Colour fraction of the attribute on its own object minus on the other object (OKLab, OWLv2 boxes)."""
-    from ladder import _tensor, measure
+    """How much closer the attribute's colour sits to its own object than to the other one: OKLab distance of the
+    other object's core mean colour to the attribute colour minus that of its own object (OWLv2 box cores; the
+    attribute colour of a blend is the midpoint of its two prototypes). Positive: the colour is on the right object."""
+    import torch
+    from color_stats import srgb_to_oklab
+    from ladder import _core, _tensor
     from predicates import _color_term
     attr, q = c.args
     term = _color_term(attr)
-    if term is None:
+    others = [o for o in objects if o != q]
+    if term is None or not others:
         return None
     base, tint, _ = term
-    others = [o for o in objects if o != q]
-    if not others:
-        return None
-    boxes = owl.boxes(img, [q] + others)
-    x = _tensor(img)
-    on = measure(x, Constraint("F6", (q,), None, (base, tint), 1), boxes, prototype)
-    off = measure(x, Constraint("F6", (others[0],), None, (base, tint), 1), boxes, prototype)
-    return None if on is None or off is None else on - off
+    target = prototype(tint) if base == "achromatic" else (prototype(base) + prototype(tint)) / 2
+    boxes, x = owl.boxes(img, [q, others[0]]), _tensor(img)
+
+    def dist(name):
+        core = None if boxes.get(name) is None else _core(x, boxes[name])
+        return None if core is None else float(torch.linalg.norm(srgb_to_oklab(core).reshape(3, -1).mean(1) - target))
+    own, other = dist(q), dist(others[0])
+    return None if own is None or other is None else other - own
 
 
 def build_pairs(out: Path, device):
@@ -129,8 +136,8 @@ def build_pairs(out: Path, device):
             if c.family not in ("F2a", "F2b", "F6", "F8", "binding"):
                 continue
             if c.family == "binding":
-                s_u = _last_raw(Path(out, "unguided", iid, "log.jsonl"), "binding", c.args)
-                s_g = None if s1 is None else _last_raw(Path(out, "stage1", iid, "log.jsonl"), "binding", c.args)
+                s_u = _last_raw(Path(out, "unguided", iid, "log.jsonl"), "binding", cid)
+                s_g = None if s1 is None else _last_raw(Path(out, "stage1", iid, "log.jsonl"), "binding", cid)
                 low, high, mu = 0.0, math.inf, None                 # beta > margin; the gate's margin is ~0
                 y_u, y_g = _binding_y(owl, img_u, c, objects, prototype), _binding_y(owl, img_g, c, objects, prototype)
             else:
