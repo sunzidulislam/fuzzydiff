@@ -81,21 +81,40 @@ def main():
         import dataclasses
         cfg = dataclasses.replace(cfg, k=1)
     deps = SimpleNamespace(calib=ProvisionalCalibration(s), seg=seg, sar_cfg=cfg, steps=steps)
+    todo = []
     for setting in args.settings.split(","):
         for arm in args.arms.split(","):
             for meta_path in sorted(Path(args.out, setting, arm).glob("*/meta.json")):
-                iid = meta_path.parent.name
-                dst = Path(args.out, setting, f"{arm}_r", iid)
-                if (dst / "image.png").exists() or not (meta_path.parent / "image.png").exists():
-                    continue
-                meta = json.loads(meta_path.read_text())
-                dst.mkdir(parents=True, exist_ok=True)
-                image = refine(backend, deps, meta["prompt"], int(meta.get("seed", 0)),
-                               to_tensor(meta_path.parent / "image.png", size), dst / "log.jsonl")
-                _save_image(image, dst / "image.png")
-                (dst / "meta.json").write_text(json.dumps({"prompt": meta["prompt"], "arm": f"{arm}_r", "seed": meta.get("seed", 0),
-                                                          "source": arm, "refinement": {"k": cfg.k, "strength": cfg.strength}}))
-                print(f"{setting} {arm}_r: {meta['prompt']}", flush=True)
+                dst = Path(args.out, setting, f"{arm}_r", meta_path.parent.name)
+                if not (dst / "image.png").exists() and (meta_path.parent / "image.png").exists():
+                    todo.append((setting, arm, meta_path, dst))
+    print(f"{len(todo)} images to refine", flush=True)
+    # every prompt is encoded first and the text encoders freed, as run_experiment.py does: SD3's T5 next to
+    # the transformer does not fit a 16 GB T4 during the image-to-image passes
+    from grounding import phrase_spans
+    from predicates import translate
+    for prompt in sorted({json.loads(m.read_text())["prompt"] for _, _, m, _ in todo}):
+        backend.encode_prompt(prompt, phrase_spans(prompt, translate(prompt)))
+    if not args.tiny:
+        backend.unload_text_encoders()
+    import traceback
+    for setting, arm, meta_path, dst in todo:
+        meta = json.loads(meta_path.read_text())
+        dst.mkdir(parents=True, exist_ok=True)
+        try:
+            image = refine(backend, deps, meta["prompt"], int(meta.get("seed", 0)),
+                           to_tensor(meta_path.parent / "image.png", size), dst / "log.jsonl")
+        except Exception as e:                      # keep going; the failure is recorded next to the image
+            (dst / "meta.json").write_text(json.dumps({"prompt": meta["prompt"], "arm": f"{arm}_r", "failed": type(e).__name__,
+                                                      "error": str(e)[:400], "traceback": traceback.format_exc()[-1500:]}))
+            print(f"{setting} {arm}_r FAILED {type(e).__name__}: {str(e)[:200]}", flush=True)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            continue
+        _save_image(image, dst / "image.png")
+        (dst / "meta.json").write_text(json.dumps({"prompt": meta["prompt"], "arm": f"{arm}_r", "seed": meta.get("seed", 0),
+                                                  "source": arm, "refinement": {"k": cfg.k, "strength": cfg.strength}}))
+        print(f"{setting} {arm}_r: {meta['prompt']}", flush=True)
 
 
 if __name__ == "__main__":
