@@ -7,3 +7,6 @@ __pycache__/
 
 # run outputs (images, logs); paper-facing results live in results/
 outputs/
+
+# AI pilot labels (not human annotations)
+results/ai_pilot/

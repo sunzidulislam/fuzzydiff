@@ -78,7 +78,7 @@ fuzzydiff/
 baselines/       Attend-and-Excite, SPO, Concept Sliders and plain SD 1.4, generated on the same prompts and seeds
 configs/         settings, provisional thresholds, vocabulary
 notebooks/       the Kaggle notebook we ran the experiments with (2x T4)
-results/         small result files the paper reads (processor checks, schedule, translation challenge, pilots)
+results/         small result files the paper reads (processor checks, schedule, translation challenge)
 tests/           unit and regression tests
 ```
 
@@ -122,8 +122,8 @@ records.
 ### Human ratings
 
 `fuzzydiff/evaluation/annotate.py` builds self-contained blind rating pages (method order shuffled per item, key
-stored separately). Ratings come back as JSON and are read by the table scripts. Files under `results/ai_pilot/`
-are pilot labels used to test the pipeline end to end. They are not human annotations and are not reported as such.
+stored separately). Ratings come back as JSON and are read by the table scripts. AI pilot labels (kept locally in
+`results/ai_pilot/`, not tracked) were used only to test the pipeline end to end; they are not human annotations.
 
 ## Tests
 
