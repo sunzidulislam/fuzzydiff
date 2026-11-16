@@ -1,22 +1,9 @@
-# Python
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
-
-# Environments
+.ruff_cache/
 .venv*/
 
-# Tooling / scratch
-.worktrees/
-.superpowers/
-
-# Outputs
+# run outputs (images, logs); paper-facing results live in results/
 outputs/
-attention_results
-docs
-
-# Carried-over project tree (tracked on refactor/repository-structure, not here)
-fuzzydiff/
-pipeline_fuzzy/
-tests/
-REVIEW.md
