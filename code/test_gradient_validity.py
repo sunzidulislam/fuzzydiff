@@ -29,6 +29,15 @@ def test_commanded_bands_respect_each_scale():
     assert commanded_band("presence", 3.0, -1, s)[0] < 3.0           # logit scale, unbounded
 
 
+def test_f2a_question_asks_in_the_constraint_direction():
+    """'more' is scored as the satisfying direction, so 'a pale jar' must ask 'less colourful', not 'more colourful'."""
+    from gradient_validity import _question
+    assert "less colourful" in _question(["F2a", ["jar"], "somewhat", "chroma", -1])
+    assert "more colourful" in _question(["F2a", ["rabbit"], "extremely", "chroma", 1])
+    assert "darker" in _question(["F2a", ["kitten"], "barely", "lightness", -1])
+    assert "lighter" in _question(["F2a", ["teapot"], "considerably", "lightness", 1])
+
+
 def test_run_page_and_score_on_the_tiny_model():
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp)

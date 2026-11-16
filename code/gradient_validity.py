@@ -274,8 +274,11 @@ def _question(constraint):
     q = args[0]
     word = {"presence": f"is the {q} more clearly there", "F1": f"is the {q} more visible",
             "F4": f"is the {q} whiter", "F9": f"is the {q} further {quantity} of the {args[-1]}"}.get(family)
-    if family == "F2a":
-        word = f"is the {q} {'lighter' if quantity == 'lightness' else 'more colourful'}"
+    if family == "F2a":                 # oriented like the constraint: "more" is always the satisfying direction
+        if quantity == "lightness":
+            word = f"is the {q} {'lighter' if orientation > 0 else 'darker'}"
+        else:
+            word = f"is the {q} {'more colourful' if orientation > 0 else 'less colourful'}"
     elif family == "F2b":
         word = f"is the {q} more {args[1]}"
     elif family == "F6":
